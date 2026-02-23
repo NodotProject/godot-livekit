@@ -1,0 +1,30 @@
+# Godot-specific ignores
+.godot/
+*.translation
+*.import
+export.cfg
+export_presets.cfg
+
+# Build artifacts and downloaded SDKs
+godot-cpp/
+livekit-sdk/
+.sconsign.dblite
+*.a
+*.o
+*.os
+*.dylib
+*.so
+*.dll
+*.lib
+*.exp
+bin/
+build/
+package/
+
+# OS/Editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
+addons/gut
