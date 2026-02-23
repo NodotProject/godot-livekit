@@ -28,7 +28,7 @@ This repository includes a custom `build.sh` script that automatically fetches t
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/your-username/godot-livekit.git
+   git clone https://github.com/NodotProject/godot-livekit.git
    cd godot-livekit
    ```
 
