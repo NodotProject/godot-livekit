@@ -114,8 +114,9 @@ elif platform == 'macos':
     env.Append(LIBS=['pthread'])
     env.Append(FRAMEWORKS=['CoreFoundation', 'Foundation', 'Security', 'AudioToolbox', 'CoreAudio'])
 
-# E2EE support - only Linux SDK currently includes E2EE symbols
-if platform == 'linux':
+# E2EE support - opt-in; requires an SDK build that includes E2EE symbols
+enable_e2ee = ARGUMENTS.get('e2ee', 'no').lower() in ['yes', 'true', '1']
+if enable_e2ee:
     env.Append(CPPDEFINES=['LIVEKIT_E2EE_SUPPORTED'])
 
 src_files = [
@@ -130,7 +131,7 @@ src_files = [
     'src/livekit_audio_source.cpp',
 ]
 
-if platform == 'linux':
+if enable_e2ee:
     src_files.append('src/livekit_e2ee.cpp')
 
 env.Execute(Mkdir('addons/godot-livekit/bin'))

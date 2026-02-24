@@ -27,10 +27,17 @@ else
     GODOT_CMD="godot"
 fi
 
-# Check if the GDExtension library exists
-if [ ! -f "addons/godot-livekit/bin/libgodot-livekit.so" ] && \
-   [ ! -f "addons/godot-livekit/bin/libgodot-livekit.dll" ] && \
-   [ ! -f "addons/godot-livekit/bin/libgodot-livekit.dylib" ]; then
+# Check if any GDExtension library exists (platform-specific names)
+LIB_FOUND=false
+for pattern in "addons/godot-livekit/bin/libgodot-livekit"*.so \
+               "addons/godot-livekit/bin/libgodot-livekit"*.dll \
+               "addons/godot-livekit/bin/libgodot-livekit"*.dylib; do
+    if [ -f "$pattern" ]; then
+        LIB_FOUND=true
+        break
+    fi
+done
+if [ "$LIB_FOUND" = false ]; then
     echo -e "${RED}Error: GDExtension library not found. Run build first.${NC}"
     exit 1
 fi
