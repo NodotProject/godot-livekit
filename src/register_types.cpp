@@ -7,7 +7,9 @@
 #include "livekit_audio_stream.h"
 #include "livekit_video_source.h"
 #include "livekit_audio_source.h"
+#ifdef LIVEKIT_E2EE_SUPPORTED
 #include "livekit_e2ee.h"
+#endif
 
 #include <gdextension_interface.h>
 #include <godot_cpp/core/defs.hpp>
@@ -52,11 +54,13 @@ void initialize_livekit_module(ModuleInitializationLevel p_level) {
     ClassDB::register_class<LiveKitVideoSource>();
     ClassDB::register_class<LiveKitAudioSource>();
 
+#ifdef LIVEKIT_E2EE_SUPPORTED
     // E2EE
     ClassDB::register_class<LiveKitE2eeOptions>();
     ClassDB::register_class<LiveKitKeyProvider>();
     ClassDB::register_class<LiveKitFrameCryptor>();
     ClassDB::register_class<LiveKitE2eeManager>();
+#endif
 }
 
 void uninitialize_livekit_module(ModuleInitializationLevel p_level) {

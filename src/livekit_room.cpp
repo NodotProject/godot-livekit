@@ -1,7 +1,9 @@
 #include "livekit_room.h"
 #include "livekit_track.h"
 #include "livekit_track_publication.h"
+#ifdef LIVEKIT_E2EE_SUPPORTED
 #include "livekit_e2ee.h"
+#endif
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -24,7 +26,9 @@ void LiveKitRoom::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_name"), &LiveKitRoom::get_name);
     ClassDB::bind_method(D_METHOD("get_metadata"), &LiveKitRoom::get_metadata);
     ClassDB::bind_method(D_METHOD("get_connection_state"), &LiveKitRoom::get_connection_state);
+#ifdef LIVEKIT_E2EE_SUPPORTED
     ClassDB::bind_method(D_METHOD("get_e2ee_manager"), &LiveKitRoom::get_e2ee_manager);
+#endif
 
     ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "local_participant", PROPERTY_HINT_RESOURCE_TYPE, "LiveKitLocalParticipant"), "", "get_local_participant");
     ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "remote_participants"), "", "get_remote_participants");
@@ -100,6 +104,7 @@ void LiveKitRoom::_bind_methods() {
             PropertyInfo(Variant::INT, "kind"),
             PropertyInfo(Variant::STRING, "topic")));
 
+#ifdef LIVEKIT_E2EE_SUPPORTED
     // E2EE signals
     ADD_SIGNAL(MethodInfo("e2ee_state_changed",
             PropertyInfo(Variant::OBJECT, "participant", PROPERTY_HINT_RESOURCE_TYPE, "LiveKitParticipant"),
@@ -107,6 +112,7 @@ void LiveKitRoom::_bind_methods() {
     ADD_SIGNAL(MethodInfo("participant_encryption_status_changed",
             PropertyInfo(Variant::OBJECT, "participant", PROPERTY_HINT_RESOURCE_TYPE, "LiveKitParticipant"),
             PropertyInfo(Variant::BOOL, "is_encrypted")));
+#endif
 
     // Connection state enum
     BIND_ENUM_CONSTANT(STATE_DISCONNECTED);
@@ -136,6 +142,7 @@ bool LiveKitRoom::connect_to_room(const String &url, const String &token, const 
     room_options.auto_subscribe = options.get("auto_subscribe", true);
     room_options.dynacast = options.get("dynacast", false);
 
+#ifdef LIVEKIT_E2EE_SUPPORTED
     // Parse E2EE options
     if (options.has("e2ee")) {
         Variant e2ee_var = options["e2ee"];
@@ -144,6 +151,7 @@ bool LiveKitRoom::connect_to_room(const String &url, const String &token, const 
             room_options.encryption = e2ee_opts->to_native();
         }
     }
+#endif
 
     bool success = room->Connect(url.utf8().get_data(), token.utf8().get_data(), room_options);
     if (success) {
@@ -167,12 +175,14 @@ bool LiveKitRoom::connect_to_room(const String &url, const String &token, const 
             remote_participants[p->get_identity()] = p;
         }
 
+#ifdef LIVEKIT_E2EE_SUPPORTED
         // Initialize E2EE manager if available
         livekit::E2EEManager *mgr = room->e2eeManager();
         if (mgr) {
             e2ee_manager_.instantiate();
             e2ee_manager_->bind_manager(mgr);
         }
+#endif
     }
     return success;
 }
@@ -181,7 +191,9 @@ void LiveKitRoom::disconnect_from_room() {
     // SDK has no explicit disconnect; destroying the Room disconnects
     local_participant.unref();
     remote_participants.clear();
+#ifdef LIVEKIT_E2EE_SUPPORTED
     e2ee_manager_.unref();
+#endif
     connection_state = STATE_DISCONNECTED;
 
     if (delegate) {
@@ -237,9 +249,11 @@ int LiveKitRoom::get_connection_state() const {
     return (int)connection_state;
 }
 
+#ifdef LIVEKIT_E2EE_SUPPORTED
 Ref<LiveKitE2eeManager> LiveKitRoom::get_e2ee_manager() const {
     return e2ee_manager_;
 }
+#endif
 
 Ref<LiveKitParticipant> LiveKitRoom::_find_or_create_participant(livekit::Participant *p) {
     if (!p) {
@@ -454,6 +468,7 @@ void LiveKitRoom::GodotRoomDelegate::onUserPacketReceived(livekit::Room &r, cons
     room->call_deferred("emit_signal", "data_received", data, p, kind, topic);
 }
 
+#ifdef LIVEKIT_E2EE_SUPPORTED
 void LiveKitRoom::GodotRoomDelegate::onE2eeStateChanged(livekit::Room &r, const livekit::E2eeStateChangedEvent &e) {
     Ref<LiveKitParticipant> p = room->_find_or_create_participant(e.participant);
     if (p.is_valid()) {
@@ -467,3 +482,4 @@ void LiveKitRoom::GodotRoomDelegate::onParticipantEncryptionStatusChanged(liveki
         room->call_deferred("emit_signal", "participant_encryption_status_changed", p, e.is_encrypted);
     }
 }
+#endif

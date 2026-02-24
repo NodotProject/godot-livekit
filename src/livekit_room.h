@@ -11,7 +11,9 @@
 #include <livekit/room_delegate.h>
 
 #include "livekit_participant.h"
+#ifdef LIVEKIT_E2EE_SUPPORTED
 #include "livekit_e2ee.h"
+#endif
 
 namespace godot {
 
@@ -59,8 +61,10 @@ private:
         void onLocalTrackPublished(livekit::Room &r, const livekit::LocalTrackPublishedEvent &e) override;
         void onLocalTrackUnpublished(livekit::Room &r, const livekit::LocalTrackUnpublishedEvent &e) override;
         void onUserPacketReceived(livekit::Room &r, const livekit::UserDataPacketEvent &e) override;
+#ifdef LIVEKIT_E2EE_SUPPORTED
         void onE2eeStateChanged(livekit::Room &r, const livekit::E2eeStateChangedEvent &e) override;
         void onParticipantEncryptionStatusChanged(livekit::Room &r, const livekit::ParticipantEncryptionStatusChangedEvent &e) override;
+#endif
     };
 
     livekit::Room *room = nullptr;
@@ -69,7 +73,9 @@ private:
     Ref<LiveKitLocalParticipant> local_participant;
     Dictionary remote_participants;
     ConnectionState connection_state = STATE_DISCONNECTED;
+#ifdef LIVEKIT_E2EE_SUPPORTED
     Ref<LiveKitE2eeManager> e2ee_manager_;
+#endif
 
     Ref<LiveKitParticipant> _find_or_create_participant(livekit::Participant *p);
 
@@ -91,7 +97,9 @@ public:
     String get_metadata() const;
     int get_connection_state() const;
 
+#ifdef LIVEKIT_E2EE_SUPPORTED
     Ref<LiveKitE2eeManager> get_e2ee_manager() const;
+#endif
 
     livekit::Room *get_native_room() const { return room; }
 };

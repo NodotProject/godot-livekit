@@ -114,6 +114,10 @@ elif platform == 'macos':
     env.Append(LIBS=['pthread'])
     env.Append(FRAMEWORKS=['CoreFoundation', 'Foundation', 'Security', 'AudioToolbox', 'CoreAudio'])
 
+# E2EE support - disabled on macOS until the SDK is rebuilt with E2EE symbols
+if platform != 'macos':
+    env.Append(CPPDEFINES=['LIVEKIT_E2EE_SUPPORTED'])
+
 src_files = [
     'src/register_types.cpp',
     'src/livekit_room.cpp',
@@ -124,8 +128,10 @@ src_files = [
     'src/livekit_audio_stream.cpp',
     'src/livekit_video_source.cpp',
     'src/livekit_audio_source.cpp',
-    'src/livekit_e2ee.cpp',
 ]
+
+if platform != 'macos':
+    src_files.append('src/livekit_e2ee.cpp')
 
 env.Execute(Mkdir('addons/godot-livekit/bin'))
 
