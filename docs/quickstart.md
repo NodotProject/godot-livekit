@@ -114,6 +114,8 @@ func call_remote_greet(target_identity: String):
 
 ## End-to-End Encryption (E2EE)
 
+> **Note:** E2EE is currently only available on Linux. macOS and Windows builds do not yet include E2EE support in the underlying LiveKit SDK.
+
 To enable E2EE when connecting to a room:
 
 ```gdscript

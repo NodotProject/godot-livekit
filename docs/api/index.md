@@ -26,7 +26,7 @@ Represents a LiveKit room. Handles connecting, disconnecting, and room-level sig
 *   `get_name() -> String`: Returns the room's name.
 *   `get_metadata() -> String`: Returns the room's metadata.
 *   `get_connection_state() -> int`: Returns the current connection state.
-*   `get_e2ee_manager() -> LiveKitE2eeManager`: Returns the E2EE manager for configuring end-to-end encryption.
+*   `get_e2ee_manager() -> LiveKitE2eeManager`: Returns the E2EE manager for configuring end-to-end encryption. *(Linux only)*
 
 **Signals:**
 *   `connected`: Emitted when successfully connected to the room.
@@ -49,8 +49,8 @@ Represents a LiveKit room. Handles connecting, disconnecting, and room-level sig
 *   `local_track_published(publication: LiveKitLocalTrackPublication, track: LiveKitTrack)`: Emitted when the local participant publishes a track.
 *   `local_track_unpublished(publication: LiveKitLocalTrackPublication)`: Emitted when the local participant unpublishes a track.
 *   `data_received(data: PackedByteArray, participant: LiveKitRemoteParticipant, kind: int, topic: String)`: Emitted when a data message is received.
-*   `e2ee_state_changed(participant: LiveKitParticipant, state: int)`: Emitted when a participant's E2EE state changes.
-*   `participant_encryption_status_changed(participant: LiveKitParticipant, is_encrypted: bool)`: Emitted when a participant's encryption status changes.
+*   `e2ee_state_changed(participant: LiveKitParticipant, state: int)`: Emitted when a participant's E2EE state changes. *(Linux only)*
+*   `participant_encryption_status_changed(participant: LiveKitParticipant, is_encrypted: bool)`: Emitted when a participant's encryption status changes. *(Linux only)*
 
 **Enums:**
 *   `ConnectionState`: `STATE_DISCONNECTED = 0`, `STATE_CONNECTED = 1`, `STATE_RECONNECTING = 2`
@@ -236,6 +236,8 @@ Receives audio frames from a remote audio track and pipes them into Godot's audi
 ---
 
 ## End-to-End Encryption (E2EE)
+
+> **Note:** E2EE is currently only available on Linux. macOS and Windows builds do not yet include E2EE support in the underlying LiveKit SDK. The classes below will not be registered on those platforms.
 
 ### `LiveKitE2eeOptions`
 Configuration options for end-to-end encryption. Pass this to the `connect_to_room()` options dictionary under the `"e2ee"` key.
