@@ -98,8 +98,7 @@ env.Append(LIBS=[File(os.path.join('godot-cpp', 'bin', godot_cpp_lib))])
 # Add LiveKit libraries (linking dynamically since they are pre-built shared libs)
 if is_windows:
     # Livekit client-sdk-cpp on Windows provides .lib import files inside lib/
-    # So we'll link against 'livekit_ffi' and 'livekit'
-    env.Append(LIBS=['livekit_ffi', 'livekit'])
+    env.Append(LIBS=[File('livekit-sdk/lib/livekit_ffi.dll.lib'), File('livekit-sdk/lib/livekit.lib')])
 elif platform == 'macos':
     env.Append(LIBS=['livekit_ffi', 'livekit'])
 else: # linux

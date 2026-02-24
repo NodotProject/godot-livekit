@@ -214,7 +214,7 @@ build_main_project() {
     if [ "$PLATFORM" == "linux" ]; then
         cp livekit-sdk/lib/*.so* addons/godot-livekit/bin/ || true
     elif [ "$PLATFORM" == "windows" ]; then
-        cp livekit-sdk/lib/*.dll addons/godot-livekit/bin/ || true
+        cp livekit-sdk/bin/*.dll addons/godot-livekit/bin/ || true
     elif [ "$PLATFORM" == "macos" ]; then
         cp livekit-sdk/lib/*.dylib addons/godot-livekit/bin/ || true
     fi
