@@ -67,8 +67,12 @@ else:
     env.Append(CCFLAGS=['-fPIC'])
     env.Append(CXXFLAGS=['-std=c++17'])
     if platform == 'macos':
-        env.Append(CCFLAGS=['-arch', arch])
-        env.Append(LINKFLAGS=['-arch', arch])
+        if arch == 'universal':
+            env.Append(CCFLAGS=['-arch', 'x86_64', '-arch', 'arm64'])
+            env.Append(LINKFLAGS=['-arch', 'x86_64', '-arch', 'arm64'])
+        else:
+            env.Append(CCFLAGS=['-arch', arch])
+            env.Append(LINKFLAGS=['-arch', arch])
 
 if is_windows and not use_mingw:
     lib_ext = '.lib'

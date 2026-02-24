@@ -35,6 +35,12 @@ if [ ! -f "addons/godot-livekit/bin/libgodot-livekit.so" ] && \
     exit 1
 fi
 
+# Define timeout command
+TIMEOUT_CMD="timeout"
+if ! command -v timeout &> /dev/null && command -v gtimeout &> /dev/null; then
+    TIMEOUT_CMD="gtimeout"
+fi
+
 # Check if GUT is installed
 if [ ! -d "addons/gut" ]; then
     echo -e "${YELLOW}Warning: GUT not found at addons/gut${NC}"
@@ -48,14 +54,14 @@ if [ ! -d "addons/gut" ]; then
     # Run basic test without GUT
     if [ -f "demo/test_basic.tscn" ]; then
         echo -e "${YELLOW}Running basic integration test...${NC}"
-        timeout 10s $GODOT_CMD --headless demo/test_basic.tscn || true
+        $TIMEOUT_CMD 10s $GODOT_CMD --headless demo/test_basic.tscn || true
         echo -e "${GREEN}✓ Basic test completed${NC}"
     fi
 
     # Run advanced demo
     if [ -f "demo/demo_advanced.tscn" ]; then
         echo -e "${YELLOW}Running advanced demo test...${NC}"
-        timeout 10s $GODOT_CMD --headless demo/demo_advanced.tscn || true
+        $TIMEOUT_CMD 10s $GODOT_CMD --headless demo/demo_advanced.tscn || true
         echo -e "${GREEN}✓ Advanced demo completed${NC}"
     fi
     
@@ -65,7 +71,7 @@ fi
 
 # Import project first
 echo -e "${YELLOW}Importing project...${NC}"
-timeout 20s $GODOT_CMD --headless --import || true
+$TIMEOUT_CMD 20s $GODOT_CMD --headless --import || true
 
 # Run unit tests
 # Note: Godot/GUT has a known issue where it hangs during cleanup after tests complete
@@ -75,7 +81,7 @@ timeout 20s $GODOT_CMD --headless --import || true
 # Our C++ cleanup is fast (verified with minimal standalone test), but GUT adds overhead.
 # Using a 30-second timeout as a workaround - tests typically complete in ~10-15 seconds.
 echo -e "${YELLOW}Running unit tests...${NC}"
-timeout 30s $GODOT_CMD --headless -s addons/gut/gut_cmdln.gd -gdir=test/unit -gexit || {
+$TIMEOUT_CMD 30s $GODOT_CMD --headless -s addons/gut/gut_cmdln.gd -gdir=test/unit -gexit || {
     EXIT_CODE=$?
     if [ $EXIT_CODE -eq 124 ]; then
         echo -e "${YELLOW}Warning: Tests timed out after 30s (known Godot/GUT cleanup issue)${NC}"
@@ -88,7 +94,7 @@ timeout 30s $GODOT_CMD --headless -s addons/gut/gut_cmdln.gd -gdir=test/unit -ge
 
 # Run integration tests with timeout (they involve network operations)
 echo -e "${YELLOW}Running integration tests...${NC}"
-timeout 20s $GODOT_CMD --headless -s addons/gut/gut_cmdln.gd -gdir=test/integration -gexit || {
+$TIMEOUT_CMD 20s $GODOT_CMD --headless -s addons/gut/gut_cmdln.gd -gdir=test/integration -gexit || {
     EXIT_CODE=$?
     if [ $EXIT_CODE -eq 124 ]; then
         echo -e "${YELLOW}Integration tests timed out after 20s (expected for network tests)${NC}"

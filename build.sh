@@ -22,7 +22,7 @@ GODOT_CPP_VERSION="godot-4.5-stable"
 show_usage() {
     echo -e "${YELLOW}Usage: $0 [linux|macos|windows]${NC}"
     echo "  linux: Build for Linux (x86_64)"
-    echo "  macos: Build for macOS (arm64)"
+    echo "  macos: Build for macOS (universal)"
     echo "  windows: Build for Windows (x86_64, cross-compile)"
     exit 1
 }
@@ -41,8 +41,8 @@ setup_macos() {
     PLATFORM="macos"
     ARCH="universal"
     SCONS_FLAGS="platform=macos arch=universal"
-    LIVEKIT_ARCHIVE="livekit-sdk-macos-arm64-${LIVEKIT_VERSION}.tar.gz"
-    LIVEKIT_URL="https://github.com/livekit/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
+    LIVEKIT_ARCHIVE="livekit-sdk-macos-universal-${LIVEKIT_VERSION}.tar.gz"
+    LIVEKIT_URL="https://github.com/krazyjakee/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
     echo -e "${BLUE}=== Godot-LiveKit Local Build Script (macOS) ===${NC}"
 }
 
@@ -95,6 +95,13 @@ fetch_godotcpp() {
 
 # Function to download livekit
 fetch_livekit() {
+    if [ "$PLATFORM" == "macos" ] && [ -f "livekit-sdk/lib/liblivekit.dylib" ]; then
+        if lipo -info livekit-sdk/lib/liblivekit.dylib | grep -q "x86_64 arm64"; then
+            echo -e "${GREEN}Detected local universal LiveKit SDK, skipping download.${NC}"
+            return 0
+        fi
+    fi
+
     echo -e "${YELLOW}Fetching LiveKit C++ SDK for ${PLATFORM}...${NC}"
 
     rm -rf livekit-sdk

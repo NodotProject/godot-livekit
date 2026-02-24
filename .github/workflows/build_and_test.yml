@@ -6,7 +6,21 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    name: Build and Test for ${{ matrix.os-name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            os-name: Linux
+            platform: linux
+          - os: ubuntu-latest
+            os-name: Windows
+            platform: windows
+          - os: macos-latest
+            os-name: macOS
+            platform: macos
+            
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -21,19 +35,40 @@ jobs:
     - name: Install SCons
       run: pip install scons
 
-    - name: Build GDExtension (Linux)
-      run: ./build.sh linux
+    - name: Install MinGW (for Windows cross-compilation)
+      if: matrix.platform == 'windows'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y mingw-w64
+
+    - name: Build GDExtension
+      run: ./build.sh ${{ matrix.platform }}
 
     - name: Download Godot 4 Headless
+      if: matrix.platform != 'windows'
       run: |
-        wget https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_linux.x86_64.zip
-        unzip Godot_v4.3-stable_linux.x86_64.zip
-        mv Godot_v4.3-stable_linux.x86_64 godot
+        if [ "${{ matrix.platform }}" == "linux" ]; then
+          wget https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v4.5-stable_linux.x86_64.zip
+          unzip Godot_v4.5-stable_linux.x86_64.zip
+          mv Godot_v4.5-stable_linux.x86_64 godot
+        elif [ "${{ matrix.platform }}" == "macos" ]; then
+          wget https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v4.5-stable_macos.universal.zip
+          unzip Godot_v4.5-stable_macos.universal.zip
+          mv Godot.app/Contents/MacOS/Godot godot
+        fi
         chmod +x godot
 
+    - name: Install coreutils for timeout (macOS)
+      if: matrix.platform == 'macos'
+      run: brew install coreutils
+
     - name: Run tests
+      if: matrix.platform != 'windows'
       run: |
+        TIMEOUT_CMD="timeout"
+        if command -v gtimeout >/dev/null 2>&1; then TIMEOUT_CMD="gtimeout"; fi
+        
         # Import the project first
-        timeout 30s ./godot --headless --import || true
+        $TIMEOUT_CMD 30s ./godot --headless --import || true
         # Run the tests (if any)
         # ./test.sh
