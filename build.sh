@@ -49,10 +49,10 @@ setup_macos() {
 setup_windows() {
     PLATFORM="windows"
     ARCH="x86_64"
-    SCONS_FLAGS="platform=windows use_mingw=yes arch=x86_64"
+    SCONS_FLAGS="platform=windows arch=x86_64"
     LIVEKIT_ARCHIVE="livekit-sdk-windows-x64-${LIVEKIT_VERSION}.zip"
     LIVEKIT_URL="https://github.com/livekit/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
-    echo -e "${BLUE}=== Godot-LiveKit Local Build Script (Windows Cross-Compile) ===${NC}"
+    echo -e "${BLUE}=== Godot-LiveKit Local Build Script (Windows Native) ===${NC}"
 }
 
 # --- Build Functions ---
@@ -176,7 +176,7 @@ install_dependencies() {
         done
         
         if [ ${#missing_tools[@]} -ne 0 ]; then
-            echo -e "${RED}Missing required tools for Windows cross-compilation: ${missing_tools[*]}${NC}"
+            echo -e "${RED}Missing required tools for Windows native build: ${missing_tools[*]}${NC}"
             exit 1
         fi
     elif [ "$PLATFORM" == "macos" ]; then
@@ -235,8 +235,6 @@ main() {
             setup_macos
             ;;
         windows)
-            export CC=x86_64-w64-mingw32-gcc
-            export CXX=x86_64-w64-mingw32-g++
             setup_windows
             ;;
         *)

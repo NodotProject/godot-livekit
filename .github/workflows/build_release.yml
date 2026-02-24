@@ -23,7 +23,7 @@ jobs:
           - os: ubuntu-latest
             os-name: Linux
             platform: linux
-          - os: ubuntu-latest
+          - os: windows-latest
             os-name: Windows
             platform: windows
           - os: macos-latest
@@ -44,13 +44,8 @@ jobs:
       - name: Install SCons
         run: pip install scons
 
-      - name: Install MinGW (for Windows cross-compilation)
-        if: matrix.platform == 'windows'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mingw-w64
-
       - name: Build GDExtension
+        shell: bash
         run: ./build.sh ${{ matrix.platform }}
 
       - name: Package addon

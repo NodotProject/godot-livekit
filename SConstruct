@@ -76,7 +76,7 @@ else:
 
 if is_windows and not use_mingw:
     lib_ext = '.lib'
-    lib_prefix = ''
+    lib_prefix = 'lib' # Prebuilt zip has 'lib' prefix even for MSVC .lib file
 else:
     lib_ext = '.a'
     lib_prefix = 'lib'
