@@ -118,6 +118,12 @@ src_files = [
     'src/register_types.cpp',
     'src/livekit_room.cpp',
     'src/livekit_participant.cpp',
+    'src/livekit_track.cpp',
+    'src/livekit_track_publication.cpp',
+    'src/livekit_video_stream.cpp',
+    'src/livekit_audio_stream.cpp',
+    'src/livekit_video_source.cpp',
+    'src/livekit_audio_source.cpp',
 ]
 
 env.Execute(Mkdir('addons/godot-livekit/bin'))

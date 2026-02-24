@@ -13,7 +13,7 @@ To build the extension from source, you will need:
 **Platform-Specific Requirements:**
 - **Linux:** `g++`, `curl`, `tar`, `unzip`
 - **macOS:** Xcode Command Line Tools, `curl`, `tar`, `unzip`
-- **Windows:** MinGW-w64 (if cross-compiling from Linux/macOS)
+- **Windows:** MSVC (Visual Studio Build Tools) or MinGW-w64 (if cross-compiling from Linux/macOS)
 
 ## Building from Source
 

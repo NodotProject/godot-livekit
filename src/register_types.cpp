@@ -1,6 +1,12 @@
 #include "register_types.h"
 #include "livekit_room.h"
 #include "livekit_participant.h"
+#include "livekit_track.h"
+#include "livekit_track_publication.h"
+#include "livekit_video_stream.h"
+#include "livekit_audio_stream.h"
+#include "livekit_video_source.h"
+#include "livekit_audio_source.h"
 
 #include <gdextension_interface.h>
 #include <godot_cpp/core/defs.hpp>
@@ -17,10 +23,33 @@ void initialize_livekit_module(ModuleInitializationLevel p_level) {
 
     livekit::initialize();
 
+    // Room
     ClassDB::register_class<LiveKitRoom>();
+
+    // Participants
     ClassDB::register_class<LiveKitParticipant>();
     ClassDB::register_class<LiveKitLocalParticipant>();
     ClassDB::register_class<LiveKitRemoteParticipant>();
+
+    // Tracks
+    ClassDB::register_class<LiveKitTrack>();
+    ClassDB::register_class<LiveKitLocalAudioTrack>();
+    ClassDB::register_class<LiveKitLocalVideoTrack>();
+    ClassDB::register_class<LiveKitRemoteAudioTrack>();
+    ClassDB::register_class<LiveKitRemoteVideoTrack>();
+
+    // Track Publications
+    ClassDB::register_class<LiveKitTrackPublication>();
+    ClassDB::register_class<LiveKitLocalTrackPublication>();
+    ClassDB::register_class<LiveKitRemoteTrackPublication>();
+
+    // Streams
+    ClassDB::register_class<LiveKitVideoStream>();
+    ClassDB::register_class<LiveKitAudioStream>();
+
+    // Sources
+    ClassDB::register_class<LiveKitVideoSource>();
+    ClassDB::register_class<LiveKitAudioSource>();
 }
 
 void uninitialize_livekit_module(ModuleInitializationLevel p_level) {

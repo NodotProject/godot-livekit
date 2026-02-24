@@ -6,9 +6,12 @@
 
 ## Features
 
-- **Real-Time Communication**: Seamlessly connect to LiveKit servers for audio, video, and data streaming.
+- **Real-Time Communication**: Connect to LiveKit servers for audio, video, and data streaming.
+- **Full Track Support**: Publish and subscribe to audio/video tracks, with local sources for capturing from Godot.
+- **Data Channels**: Send and receive arbitrary data messages with reliable or unreliable delivery.
+- **RPC Support**: Perform remote procedure calls between participants.
 - **Fast Build Times**: Uses prebuilt binaries for both `godot-cpp` and the LiveKit C++ SDK, reducing compilation time to seconds instead of hours.
-- **Cross-Platform**: Supports Linux, macOS (Universal), and Windows (via MinGW cross-compilation).
+- **Cross-Platform**: Supports Linux, macOS (Universal), and Windows.
 - **Native GDExtension**: Works out-of-the-box with Godot 4.5 without requiring custom engine builds.
 
 ## Prerequisites
@@ -22,7 +25,7 @@ To build the extension from source, you will need:
 **Platform-Specific Requirements:**
 - **Linux:** `g++`, `curl`, `tar`, `unzip`
 - **macOS:** Xcode Command Line Tools, `curl`, `tar`, `unzip`
-- **Windows:** MinGW-w64 (if cross-compiling from Linux/macOS)
+- **Windows:** MSVC (Visual Studio Build Tools) or MinGW-w64 (if cross-compiling from Linux/macOS)
 
 ## Building from Source
 
@@ -55,7 +58,7 @@ Once the build is complete, the compiled dynamic libraries (`.so`, `.dylib`, or 
 
 1. Copy the `addons/godot-livekit` folder into your Godot project's `addons/` directory.
 2. Enable the plugin from the Godot Editor: **Project -> Project Settings -> Plugins**.
-3. You can now access LiveKit classes (e.g., `LiveKitRoom`) directly from GDScript:
+3. You can now access LiveKit classes directly from GDScript:
 
 ```gdscript
 extends Node
@@ -64,7 +67,23 @@ var room: LiveKitRoom
 
 func _ready():
     room = LiveKitRoom.new()
-    # LiveKit API implementation details go here...
+    room.connected.connect(_on_connected)
+    room.participant_connected.connect(_on_participant_connected)
+    room.track_subscribed.connect(_on_track_subscribed)
+    room.data_received.connect(_on_data_received)
+    room.connect_to_room("wss://your-server.url", "your-token", {})
+
+func _on_connected():
+    print("Connected as: ", room.get_local_participant().get_identity())
+
+func _on_participant_connected(participant):
+    print("Joined: ", participant.get_identity())
+
+func _on_track_subscribed(track, publication, participant):
+    print("Track subscribed: ", track.get_name())
+
+func _on_data_received(data, participant, kind, topic):
+    print("Data from ", participant.get_identity(), ": ", data.get_string_from_utf8())
 ```
 
 ## Running Tests

@@ -78,52 +78,51 @@ Below is the mapping of every major LiveKit SDK component to its corresponding G
 
 To ensure steady progress and maintainable code, the development will be broken down into the following phases.
 
-### Phase 1: Core Setup & Connection
+### Phase 1: Core Setup & Connection ✅
 **Goal**: Connect to a room, disconnect, and handle basic room state.
 - Initialize LiveKit SDK (if required by SDK versions).
 - Implement `LiveKitRoom` shell.
 - Implement the `RoomDelegate` wrapper to translate C++ callbacks into Godot deferred signals (e.g., `connected`, `disconnected`, `room_update`).
 - Expose the `.connect(url, token, options)` and `.disconnect()` methods to GDScript.
 
-### Phase 2: Participant Management
+### Phase 2: Participant Management ✅
 **Goal**: Track who is in the room.
 - Implement `LiveKitParticipant`, `LiveKitLocalParticipant`, and `LiveKitRemoteParticipant`.
 - Handle `participant_connected` and `participant_disconnected` signals in the Room.
 - Populate `LiveKitRoom` methods like `get_local_participant()` and `get_remote_participants()`.
-- Add dictionary/properties for participant metadata and identity.
+- Add dictionary/properties for participant metadata, identity, attributes, and kind.
 
-### Phase 3: Track Subscriptions & Data Channels
+### Phase 3: Track Subscriptions & Data Channels ✅
 **Goal**: Know when participants publish tracks and handle arbitrary data messages.
 - Implement `LiveKitTrackPublication` hierarchy (`LocalTrackPublication`, `RemoteTrackPublication`).
-- Expose properties for Track SID, Name, Kind, and Muted state.
-- Wire signals: `track_published`, `track_unpublished`, `track_subscribed`, `track_unsubscribed`.
+- Expose properties for Track SID, Name, Kind, Source, and Muted state.
+- Wire signals: `track_published`, `track_unpublished`, `track_subscribed`, `track_unsubscribed`, `track_muted`, `track_unmuted`, `local_track_published`, `local_track_unpublished`.
 - Implement data channel publishing (`local_participant.publish_data()`) and receiving (`room.data_received` signal).
 
-### Phase 4: Video Streaming
+### Phase 4: Video Streaming ✅
 **Goal**: Render remote video to the Godot screen.
-- Implement `LiveKitVideoTrack` and `LiveKitRemoteVideoTrack`.
-- Implement `LiveKitVideoStream` to consume a `RemoteVideoTrack`.
-- Write the frame conversion logic: `livekit::VideoFrame` (I420/ARGB) -> Godot `Image`.
-- Expose a `get_texture()` method on `LiveKitVideoStream` that Godot UI/Mesh nodes can use to draw the frame. Ensure thread-safety when updating textures.
+- Implement `LiveKitTrack` base class with `LiveKitLocalVideoTrack` and `LiveKitRemoteVideoTrack`.
+- Implement `LiveKitVideoStream` to consume video tracks or participant sources.
+- Write the frame conversion logic: `livekit::VideoFrame` -> Godot `Image` -> `ImageTexture`.
+- Expose a `get_texture()` method and `poll()` for frame updates with thread-safe texture updating.
 
-### Phase 5: Audio Streaming
+### Phase 5: Audio Streaming ✅
 **Goal**: Hear remote audio.
-- Implement `LiveKitAudioTrack` and `LiveKitRemoteAudioTrack`.
-- Implement `LiveKitAudioStream` to consume an `RemoteAudioTrack`.
-- Write the audio sink logic: pipe `livekit::AudioFrame` PCM data into Godot's `AudioStreamGeneratorPlayback`. Resample if necessary using Godot APIs.
+- Implement `LiveKitLocalAudioTrack` and `LiveKitRemoteAudioTrack`.
+- Implement `LiveKitAudioStream` to consume audio tracks or participant sources.
+- Write the audio sink logic: pipe audio data into Godot's `AudioStreamGeneratorPlayback` via `poll()`.
 
-### Phase 6: Local Publishing (Camera/Mic)
+### Phase 6: Local Publishing (Camera/Mic) ✅
 **Goal**: Send Godot viewport/camera or Godot microphone input to the room.
-- Implement `LiveKitVideoSource` and `LiveKitAudioSource`.
-- Provide methods to push Godot `Image` data to the `VideoSource`.
-- Provide methods to push Godot `AudioEffectCapture` buffers to the `AudioSource`.
-- Bind `local_participant.publish_track()`.
+- Implement `LiveKitVideoSource` with `capture_frame()` accepting Godot `Image`.
+- Implement `LiveKitAudioSource` with `capture_frame()` accepting `PackedFloat32Array`.
+- Bind `local_participant.publish_track()` and `unpublish_track()`.
 
-### Phase 7: Advanced Features
+### Phase 7: Advanced Features (Partial)
 **Goal**: Polish and complete the API.
-- Implement RPC methods (Perform remote procedure calls via LiveKit).
-- Expose End-to-End Encryption (E2EE) classes and setup.
-- Gather and expose network/webrtc connection statistics (`livekit::Stats`).
+- ✅ Implement RPC methods (`perform_rpc`, `register_rpc_method`, `respond_to_rpc`).
+- ⬜ Expose End-to-End Encryption (E2EE) classes and setup.
+- ⬜ Gather and expose network/webrtc connection statistics (`livekit::Stats`).
 
 ### Phase 8: Exporting & Packaging
 **Goal**: Ensure the GDExtension can be successfully exported with Godot projects across target platforms.
