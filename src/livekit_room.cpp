@@ -132,6 +132,7 @@ LiveKitRoom::~LiveKitRoom() {
         connect_thread_.join();
     }
     if (room) {
+        room->setDelegate(nullptr);
         delete room;
         room = nullptr;
     }
@@ -240,13 +241,16 @@ void LiveKitRoom::disconnect_from_room() {
 #endif
     connection_state = STATE_DISCONNECTED;
 
+    // Detach delegate before destroying the room so the Room destructor
+    // does not fire callbacks into a freed delegate (use-after-free).
+    if (room) {
+        room->setDelegate(nullptr);
+        delete room;
+        room = nullptr;
+    }
     if (delegate) {
         delete delegate;
         delegate = nullptr;
-    }
-    if (room) {
-        delete room;
-        room = nullptr;
     }
 
     // Recreate room and delegate for potential reconnection
