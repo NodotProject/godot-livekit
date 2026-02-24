@@ -132,7 +132,9 @@ else:
     env['SHLIBSUFFIX'] = '.so'
 
 lib_name = f"godot-livekit.{platform}.{target}.{arch}"
-if platform == 'macos' and not lib_name.endswith('.dylib'):
+if platform == 'windows' and not lib_name.endswith('.dll'):
+    lib_name += '.dll'
+elif platform == 'macos' and not lib_name.endswith('.dylib'):
     lib_name += '.dylib'
 library = env.SharedLibrary(target=lib_name, source=src_files)
 installed_library = env.Install('addons/godot-livekit/bin', library)
