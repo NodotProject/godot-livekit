@@ -47,7 +47,7 @@ env.Append(CPPPATH=[
 ])
 
 # For Windows cross-compilation with MinGW, point to standard paths
-if use_mingw or platform == 'windows':
+if use_mingw and is_windows:
     env.Append(CCFLAGS=['--sysroot=/usr/x86_64-w64-mingw32'])
     env.Append(LINKFLAGS=['--sysroot=/usr/x86_64-w64-mingw32'])
 
@@ -55,7 +55,8 @@ env.Append(LIBPATH=['godot-cpp/bin', 'livekit-sdk/lib'])
 
 is_windows = platform == 'windows'
 if is_windows and not use_mingw:
-    env.Append(CXXFLAGS=['/std:c++17'])
+    env.Append(CXXFLAGS=['/std:c++17', '/EHsc', '/MD'])
+    env.Append(CPPDEFINES=['WIN32', '_WIN32', 'WINDOWS_ENABLED', 'TYPED_METHOD_BIND', 'NOMINMAX'])
 elif is_windows and use_mingw:
     env.Append(CCFLAGS=['-fPIC'])
     env.Append(CXXFLAGS=['-std=c++17'])
