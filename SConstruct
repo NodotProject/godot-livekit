@@ -66,6 +66,9 @@ elif is_windows and use_mingw:
 else:
     env.Append(CCFLAGS=['-fPIC'])
     env.Append(CXXFLAGS=['-std=c++17'])
+    if platform == 'macos':
+        env.Append(CCFLAGS=['-arch', arch])
+        env.Append(LINKFLAGS=['-arch', arch])
 
 if is_windows and not use_mingw:
     lib_ext = '.lib'
@@ -75,7 +78,17 @@ else:
     lib_prefix = 'lib'
 
 # Add godot-cpp library
-godot_cpp_lib = f"{lib_prefix}godot-cpp.{platform}.{target}.{arch}{lib_ext}"
+if platform == 'macos':
+    # On macOS, if we build for arm64 or x86_64, we might still want to use the universal godot-cpp lib if specific arch isn't there
+    godot_cpp_lib_specific = f"{lib_prefix}godot-cpp.{platform}.{target}.{arch}{lib_ext}"
+    godot_cpp_lib_uni = f"{lib_prefix}godot-cpp.{platform}.{target}.universal{lib_ext}"
+    if os.path.exists(os.path.join('godot-cpp', 'bin', godot_cpp_lib_specific)):
+        godot_cpp_lib = godot_cpp_lib_specific
+    else:
+        godot_cpp_lib = godot_cpp_lib_uni
+else:
+    godot_cpp_lib = f"{lib_prefix}godot-cpp.{platform}.{target}.{arch}{lib_ext}"
+
 env.Append(LIBS=[File(os.path.join('godot-cpp', 'bin', godot_cpp_lib))])
 
 # Add LiveKit libraries (linking dynamically since they are pre-built shared libs)
@@ -100,6 +113,7 @@ elif platform == 'macos':
 src_files = [
     'src/register_types.cpp',
     'src/livekit_room.cpp',
+    'src/livekit_participant.cpp',
 ]
 
 env.Execute(Mkdir('addons/godot-livekit/bin'))
@@ -115,6 +129,8 @@ else:
     env['SHLIBSUFFIX'] = '.so'
 
 lib_name = f"godot-livekit.{platform}.{target}.{arch}"
+if platform == 'macos' and not lib_name.endswith('.dylib'):
+    lib_name += '.dylib'
 library = env.SharedLibrary(target=lib_name, source=src_files)
 installed_library = env.Install('addons/godot-livekit/bin', library)
 Default(installed_library)

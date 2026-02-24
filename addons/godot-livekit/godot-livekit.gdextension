@@ -1,6 +1,6 @@
 [configuration]
 entry_symbol = "livekit_library_init"
-compatibility_minimum = "4.1"
+compatibility_minimum = "4.5"
 
 [libraries]
 linux.debug.x86_64 = "res://addons/godot-livekit/bin/libgodot-livekit.linux.template_debug.x86_64.so"

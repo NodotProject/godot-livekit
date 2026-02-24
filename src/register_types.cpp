@@ -1,9 +1,12 @@
 #include "register_types.h"
 #include "livekit_room.h"
+#include "livekit_participant.h"
 
 #include <gdextension_interface.h>
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
+
+#include <livekit/livekit.h>
 
 using namespace godot;
 
@@ -12,13 +15,20 @@ void initialize_livekit_module(ModuleInitializationLevel p_level) {
         return;
     }
 
+    livekit::initialize();
+
     ClassDB::register_class<LiveKitRoom>();
+    ClassDB::register_class<LiveKitParticipant>();
+    ClassDB::register_class<LiveKitLocalParticipant>();
+    ClassDB::register_class<LiveKitRemoteParticipant>();
 }
 
 void uninitialize_livekit_module(ModuleInitializationLevel p_level) {
     if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
         return;
     }
+
+    livekit::shutdown();
 }
 
 extern "C" {
