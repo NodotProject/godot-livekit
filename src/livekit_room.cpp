@@ -138,6 +138,8 @@ LiveKitRoom::~LiveKitRoom() {
 }
 
 bool LiveKitRoom::connect_to_room(const String &url, const String &token, const Dictionary &options) {
+    auto_reconnect_ = options.get("auto_reconnect", true);
+
     livekit::RoomOptions room_options;
     room_options.auto_subscribe = options.get("auto_subscribe", true);
     room_options.dynacast = options.get("dynacast", false);
@@ -315,11 +317,23 @@ void LiveKitRoom::GodotRoomDelegate::onDisconnected(livekit::Room &r, const live
 }
 
 void LiveKitRoom::GodotRoomDelegate::onReconnecting(livekit::Room &r, const livekit::ReconnectingEvent &e) {
+    if (!room->auto_reconnect_) {
+        // Auto-reconnect disabled: treat as a clean disconnect so the
+        // application can initiate a fresh connection instead of letting
+        // the SDK retry with a stale participant SID.
+        room->connection_state = STATE_DISCONNECTED;
+        room->call_deferred("emit_signal", "disconnected");
+        return;
+    }
     room->connection_state = STATE_RECONNECTING;
     room->call_deferred("emit_signal", "reconnecting");
 }
 
 void LiveKitRoom::GodotRoomDelegate::onReconnected(livekit::Room &r, const livekit::ReconnectedEvent &e) {
+    if (!room->auto_reconnect_) {
+        // Ignore: we already emitted disconnected in onReconnecting.
+        return;
+    }
     room->connection_state = STATE_CONNECTED;
     room->call_deferred("emit_signal", "reconnected");
 }

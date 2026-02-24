@@ -69,6 +69,7 @@ private:
 
     livekit::Room *room = nullptr;
     GodotRoomDelegate *delegate = nullptr;
+    bool auto_reconnect_ = true;
 
     Ref<LiveKitLocalParticipant> local_participant;
     Dictionary remote_participants;
