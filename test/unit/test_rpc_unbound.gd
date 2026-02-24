@@ -1,0 +1,45 @@
+extends GutTest
+## Tests all RPC methods on unbound LiveKitLocalParticipant don't crash.
+
+
+func test_perform_rpc_unbound():
+	var lp := LiveKitLocalParticipant.new()
+	# Should not crash — null guard at livekit_participant.cpp prints error and returns
+	lp.perform_rpc("dest", "method", "payload", 10.0)
+	assert_true(true, "perform_rpc on unbound participant should not crash")
+
+
+func test_register_rpc_method_unbound():
+	var lp := LiveKitLocalParticipant.new()
+	# Should not crash — null guard returns early
+	lp.register_rpc_method("test_method")
+	assert_true(true, "register_rpc_method on unbound participant should not crash")
+
+
+func test_unregister_rpc_method_unbound():
+	var lp := LiveKitLocalParticipant.new()
+	# Should not crash — null guard returns early
+	lp.unregister_rpc_method("test_method")
+	assert_true(true, "unregister_rpc_method on unbound participant should not crash")
+
+
+func test_respond_to_rpc_unbound():
+	var lp := LiveKitLocalParticipant.new()
+	# Should not crash — prints error about async not supported
+	lp.respond_to_rpc("request_id", "payload")
+	assert_true(true, "respond_to_rpc on unbound participant should not crash")
+
+
+func test_respond_to_rpc_error_unbound():
+	var lp := LiveKitLocalParticipant.new()
+	# Should not crash — prints error about async not supported
+	lp.respond_to_rpc_error("request_id", 500, "error message")
+	assert_true(true, "respond_to_rpc_error on unbound participant should not crash")
+
+
+func test_publish_track_unbound():
+	var lp := LiveKitLocalParticipant.new()
+	var track := LiveKitTrack.new()
+	# Should return null — null guard checks local_participant_ pointer
+	var result = lp.publish_track(track, {})
+	assert_null(result, "publish_track on unbound participant should return null")

@@ -6,6 +6,8 @@
 
 #include <livekit/rpc_error.h>
 
+#include <algorithm>
+
 using namespace godot;
 
 // LiveKitParticipant
@@ -126,6 +128,13 @@ LiveKitLocalParticipant::LiveKitLocalParticipant() {
 }
 
 LiveKitLocalParticipant::~LiveKitLocalParticipant() {
+    // Unregister all RPC methods so the SDK doesn't invoke callbacks
+    // into a freed object.
+    if (local_participant_) {
+        for (const auto &method : registered_rpc_methods_) {
+            local_participant_->unregisterRpcMethod(method);
+        }
+    }
 }
 
 void LiveKitLocalParticipant::bind_local_participant(livekit::LocalParticipant *p) {
@@ -254,16 +263,20 @@ void LiveKitLocalParticipant::perform_rpc(const String &destination, const Strin
     std::string payload_str(payload.utf8().get_data());
     String method_for_signal = method;
 
+    // Prevent the Godot ref-counted object from being freed while the
+    // background thread is running.
+    Ref<LiveKitLocalParticipant> prevent_free(this);
+
     // Run the blocking SDK call on a background thread; deliver the result
     // back to the main thread via signal (call_deferred is thread-safe).
-    std::thread([this, dest_str, method_str, payload_str, timeout, method_for_signal]() {
+    std::thread([prevent_free, dest_str, method_str, payload_str, timeout, method_for_signal]() {
         try {
-            std::string result = local_participant_->performRpc(
+            std::string result = prevent_free->local_participant_->performRpc(
                     dest_str, method_str, payload_str, timeout);
-            call_deferred("emit_signal", "rpc_response_received",
+            prevent_free->call_deferred("emit_signal", "rpc_response_received",
                     method_for_signal, String(result.c_str()));
         } catch (const livekit::RpcError &e) {
-            call_deferred("emit_signal", "rpc_error",
+            prevent_free->call_deferred("emit_signal", "rpc_error",
                     method_for_signal, String(e.message().c_str()));
         }
     }).detach();
@@ -275,6 +288,7 @@ void LiveKitLocalParticipant::register_rpc_method(const String &method) {
     }
 
     std::string method_name = method.utf8().get_data();
+    registered_rpc_methods_.push_back(method_name);
     local_participant_->registerRpcMethod(method_name,
             [this, method](const livekit::RpcInvocationData &data) -> std::optional<std::string> {
                 call_deferred("emit_signal", "rpc_method_invoked",
@@ -292,7 +306,11 @@ void LiveKitLocalParticipant::unregister_rpc_method(const String &method) {
     if (!local_participant_) {
         return;
     }
-    local_participant_->unregisterRpcMethod(std::string(method.utf8().get_data()));
+    std::string method_name = method.utf8().get_data();
+    local_participant_->unregisterRpcMethod(method_name);
+    registered_rpc_methods_.erase(
+            std::remove(registered_rpc_methods_.begin(), registered_rpc_methods_.end(), method_name),
+            registered_rpc_methods_.end());
 }
 
 void LiveKitLocalParticipant::respond_to_rpc(const String &request_id, const String &payload) {

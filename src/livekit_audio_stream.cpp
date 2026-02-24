@@ -27,9 +27,12 @@ LiveKitAudioStream::~LiveKitAudioStream() {
 }
 
 void LiveKitAudioStream::_reader_loop() {
+    // Capture a local copy so the native stream stays alive even if
+    // close() calls stream_.reset() on another thread.
+    auto stream = stream_;
     while (running_.load()) {
         livekit::AudioFrameEvent event;
-        bool ok = stream_->read(event);
+        bool ok = stream->read(event);
         if (!ok) {
             break;
         }
@@ -107,11 +110,11 @@ Ref<LiveKitAudioStream> LiveKitAudioStream::from_participant(const Ref<LiveKitRe
 }
 
 int LiveKitAudioStream::get_sample_rate() const {
-    return sample_rate_;
+    return sample_rate_.load();
 }
 
 int LiveKitAudioStream::get_num_channels() const {
-    return num_channels_;
+    return num_channels_.load();
 }
 
 int LiveKitAudioStream::poll(const Ref<AudioStreamGeneratorPlayback> &playback) {
@@ -132,7 +135,7 @@ int LiveKitAudioStream::poll(const Ref<AudioStreamGeneratorPlayback> &playback) 
         return 0;
     }
 
-    int channels = num_channels_;
+    int channels = num_channels_.load();
     if (channels <= 0) {
         channels = 1;
     }
@@ -175,9 +178,9 @@ void LiveKitAudioStream::close() {
         stream_->close();
     }
     if (reader_thread_.joinable()) {
-        // stream_->close() should make read() return false almost immediately.
-        // Brief poll as a safety net; detach if the thread doesn't exit.
-        for (int i = 0; i < 20 && !thread_exited_.load(); ++i) {
+        // stream_->close() should make read() return false promptly.
+        // Wait up to 2 seconds as a safety net; detach if the thread doesn't exit.
+        for (int i = 0; i < 2000 && !thread_exited_.load(); ++i) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         if (thread_exited_.load()) {

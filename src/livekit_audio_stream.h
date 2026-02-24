@@ -29,8 +29,8 @@ private:
     std::thread reader_thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> thread_exited_{false};
-    int sample_rate_ = 48000;
-    int num_channels_ = 1;
+    std::atomic<int> sample_rate_{48000};
+    std::atomic<int> num_channels_{1};
 
     void _reader_loop();
 

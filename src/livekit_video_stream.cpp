@@ -23,9 +23,12 @@ LiveKitVideoStream::~LiveKitVideoStream() {
 }
 
 void LiveKitVideoStream::_reader_loop() {
+    // Capture a local copy so the native stream stays alive even if
+    // close() calls stream_.reset() on another thread.
+    auto stream = stream_;
     while (running_.load()) {
         livekit::VideoFrameEvent event;
-        bool ok = stream_->read(event);
+        bool ok = stream->read(event);
         if (!ok) {
             break;
         }
@@ -135,9 +138,9 @@ void LiveKitVideoStream::close() {
         stream_->close();
     }
     if (reader_thread_.joinable()) {
-        // stream_->close() should make read() return false almost immediately.
-        // Brief poll as a safety net; detach if the thread doesn't exit.
-        for (int i = 0; i < 20 && !thread_exited_.load(); ++i) {
+        // stream_->close() should make read() return false promptly.
+        // Wait up to 2 seconds as a safety net; detach if the thread doesn't exit.
+        for (int i = 0; i < 2000 && !thread_exited_.load(); ++i) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         if (thread_exited_.load()) {

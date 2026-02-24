@@ -11,7 +11,9 @@
 #include <livekit/local_participant.h>
 #include <livekit/remote_participant.h>
 
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace godot {
 
@@ -53,6 +55,7 @@ class LiveKitLocalParticipant : public LiveKitParticipant {
 
 private:
     livekit::LocalParticipant *local_participant_ = nullptr;
+    std::vector<std::string> registered_rpc_methods_;
 
 protected:
     static void _bind_methods();

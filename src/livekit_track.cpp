@@ -343,10 +343,14 @@ void LiveKitTrack::request_stats() {
         return;
     }
 
+    // Prevent the Godot ref-counted object from being freed while the
+    // background thread is running.
+    Ref<LiveKitTrack> prevent_free(this);
+
     // Capture shared_ptr so the native track stays alive for the duration
     std::shared_ptr<livekit::Track> track_copy = track_;
 
-    std::thread([this, track_copy]() {
+    std::thread([prevent_free, track_copy]() {
         try {
             auto future = track_copy->getStats();
             auto status = future.wait_for(std::chrono::seconds(5));
@@ -356,7 +360,7 @@ void LiveKitTrack::request_stats() {
                 for (const auto &stats : stats_vec) {
                     result.push_back(stats_variant_to_dict(stats));
                 }
-                call_deferred("emit_signal", "stats_received", result);
+                prevent_free->call_deferred("emit_signal", "stats_received", result);
             } else {
                 UtilityFunctions::printerr("LiveKitTrack::request_stats: timed out waiting for stats");
             }

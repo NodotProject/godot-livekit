@@ -48,32 +48,21 @@ if ! command -v timeout &> /dev/null && command -v gtimeout &> /dev/null; then
     TIMEOUT_CMD="gtimeout"
 fi
 
-# Check if GUT is installed
+# Auto-download GUT if not installed
+GUT_VERSION="v9.3.0"
 if [ ! -d "addons/gut" ]; then
-    echo -e "${YELLOW}Warning: GUT not found at addons/gut${NC}"
-    echo "To install GUT:"
-    echo "1. Download from: https://github.com/bitwes/Gut"
-    echo "2. Extract to addons/gut/"
-    echo "3. Or install from Godot Asset Library"
-    echo ""
-    echo -e "${BLUE}Running basic functionality tests instead...${NC}"
-    
-    # Run basic test without GUT
-    if [ -f "demo/test_basic.tscn" ]; then
-        echo -e "${YELLOW}Running basic integration test...${NC}"
-        $TIMEOUT_CMD 10s $GODOT_CMD --headless demo/test_basic.tscn || true
-        echo -e "${GREEN}✓ Basic test completed${NC}"
-    fi
-
-    # Run advanced demo
-    if [ -f "demo/demo_advanced.tscn" ]; then
-        echo -e "${YELLOW}Running advanced demo test...${NC}"
-        $TIMEOUT_CMD 10s $GODOT_CMD --headless demo/demo_advanced.tscn || true
-        echo -e "${GREEN}✓ Advanced demo completed${NC}"
-    fi
-    
-    echo -e "${GREEN}All available tests completed!${NC}"
-    exit 0
+    echo -e "${YELLOW}GUT not found — downloading ${GUT_VERSION}...${NC}"
+    GUT_TMP=$(mktemp -d)
+    git clone --depth 1 --branch "${GUT_VERSION}" https://github.com/bitwes/Gut.git "${GUT_TMP}" 2>/dev/null || {
+        echo -e "${RED}Failed to download GUT. Install manually:${NC}"
+        echo "  git clone --depth 1 --branch ${GUT_VERSION} https://github.com/bitwes/Gut.git /tmp/gut"
+        echo "  cp -r /tmp/gut/addons/gut addons/gut"
+        exit 1
+    }
+    mkdir -p addons
+    cp -r "${GUT_TMP}/addons/gut" addons/gut
+    rm -rf "${GUT_TMP}"
+    echo -e "${GREEN}GUT ${GUT_VERSION} installed successfully${NC}"
 fi
 
 # Import project first
@@ -88,7 +77,9 @@ $TIMEOUT_CMD 20s $GODOT_CMD --headless --import || true
 # Our C++ cleanup is fast (verified with minimal standalone test), but GUT adds overhead.
 # Using a 30-second timeout as a workaround - tests typically complete in ~10-15 seconds.
 echo -e "${YELLOW}Running unit tests...${NC}"
-$TIMEOUT_CMD 30s $GODOT_CMD --headless -s addons/gut/gut_cmdln.gd -gdir=test/unit -gexit || {
+$TIMEOUT_CMD 30s $GODOT_CMD --headless -s addons/gut/gut_cmdln.gd \
+    -gdir=test/unit -gexit \
+    -gconfig=res://test/.gutconfig.json || {
     EXIT_CODE=$?
     if [ $EXIT_CODE -eq 124 ]; then
         echo -e "${YELLOW}Warning: Tests timed out after 30s (known Godot/GUT cleanup issue)${NC}"
@@ -99,21 +90,38 @@ $TIMEOUT_CMD 30s $GODOT_CMD --headless -s addons/gut/gut_cmdln.gd -gdir=test/uni
     fi
 }
 
-# Run integration tests with timeout (they involve network operations)
-echo -e "${YELLOW}Running integration tests...${NC}"
-$TIMEOUT_CMD 20s $GODOT_CMD --headless -s addons/gut/gut_cmdln.gd -gdir=test/integration -gexit || {
-    EXIT_CODE=$?
-    if [ $EXIT_CODE -eq 124 ]; then
-        echo -e "${YELLOW}Integration tests timed out after 20s (expected for network tests)${NC}"
-    else
-        exit $EXIT_CODE
-    fi
-}
+# Run integration tests only when LIVEKIT_TEST_URL is set
+if [ -n "${LIVEKIT_TEST_URL}" ]; then
+    echo -e "${YELLOW}Running integration tests (server: ${LIVEKIT_TEST_URL})...${NC}"
+    $TIMEOUT_CMD 30s $GODOT_CMD --headless -s addons/gut/gut_cmdln.gd \
+        -gdir=test/integration -gexit \
+        -gconfig=res://test/.gutconfig.json || {
+        EXIT_CODE=$?
+        if [ $EXIT_CODE -eq 124 ]; then
+            echo -e "${YELLOW}Integration tests timed out after 30s${NC}"
+        else
+            echo -e "${RED}Integration tests failed with exit code $EXIT_CODE${NC}"
+            exit $EXIT_CODE
+        fi
+    }
+else
+    echo -e "${BLUE}Skipping integration tests (LIVEKIT_TEST_URL not set)${NC}"
+fi
 
 # Run performance tests if they exist
 if [ -d "test/performance" ]; then
     echo -e "${YELLOW}Running performance tests...${NC}"
-    $GODOT_CMD --headless -s addons/gut/gut_cmdln.gd -gdir=test/performance -gexit
+    $TIMEOUT_CMD 60s $GODOT_CMD --headless -s addons/gut/gut_cmdln.gd \
+        -gdir=test/performance -gexit \
+        -gconfig=res://test/.gutconfig.json || {
+        EXIT_CODE=$?
+        if [ $EXIT_CODE -eq 124 ]; then
+            echo -e "${YELLOW}Performance tests timed out after 60s (known Godot/GUT cleanup issue)${NC}"
+        else
+            echo -e "${RED}Performance tests failed with exit code $EXIT_CODE${NC}"
+            exit $EXIT_CODE
+        fi
+    }
 fi
 
 echo -e "${GREEN}All tests completed!${NC}"

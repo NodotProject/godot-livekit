@@ -19,7 +19,7 @@ jobs:
           - os: macos-latest
             os-name: macOS
             platform: macos
-            
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -56,13 +56,22 @@ jobs:
       if: matrix.platform == 'macos'
       run: brew install coreutils
 
-    - name: Run tests
+    - name: Install GUT
       if: matrix.platform != 'windows'
       run: |
-        TIMEOUT_CMD="timeout"
-        if command -v gtimeout >/dev/null 2>&1; then TIMEOUT_CMD="gtimeout"; fi
-        
-        # Import the project first
-        $TIMEOUT_CMD 30s ./godot --headless --import || true
-        # Run the tests (if any)
-        # ./test.sh
+        git clone --depth 1 --branch v9.3.0 https://github.com/bitwes/Gut.git /tmp/gut
+        mkdir -p addons
+        cp -r /tmp/gut/addons/gut addons/gut
+        rm -rf /tmp/gut
+
+    - name: Run tests
+      if: matrix.platform != 'windows'
+      run: ./test.sh
+
+    - name: Upload test results
+      if: matrix.platform != 'windows' && always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ matrix.os-name }}
+        path: test_results.xml
+        if-no-files-found: ignore
