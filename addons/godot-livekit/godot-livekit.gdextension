@@ -3,17 +3,11 @@ entry_symbol = "livekit_library_init"
 compatibility_minimum = "4.5"
 
 [libraries]
-linux.debug.x86_64 = "res://addons/godot-livekit/bin/libgodot-livekit.linux.template_debug.x86_64.so"
-linux.release.x86_64 = "res://addons/godot-livekit/bin/libgodot-livekit.linux.template_release.x86_64.so"
-windows.debug.x86_64 = "res://addons/godot-livekit/bin/libgodot-livekit.windows.template_debug.x86_64.dll"
-windows.release.x86_64 = "res://addons/godot-livekit/bin/libgodot-livekit.windows.template_release.x86_64.dll"
-macos.debug = "res://addons/godot-livekit/bin/libgodot-livekit.macos.template_debug.universal.dylib"
-macos.release = "res://addons/godot-livekit/bin/libgodot-livekit.macos.template_release.universal.dylib"
+linux.x86_64 = "res://addons/godot-livekit/bin/libgodot-livekit.linux.x86_64.so"
+windows.x86_64 = "res://addons/godot-livekit/bin/libgodot-livekit.windows.x86_64.dll"
+macos = "res://addons/godot-livekit/bin/libgodot-livekit.macos.universal.dylib"
 
 [dependencies]
-linux.debug.x86_64 = {"res://addons/godot-livekit/bin/liblivekit_ffi.so": "", "res://addons/godot-livekit/bin/liblivekit.so": ""}
-linux.release.x86_64 = {"res://addons/godot-livekit/bin/liblivekit_ffi.so": "", "res://addons/godot-livekit/bin/liblivekit.so": ""}
-windows.debug.x86_64 = {"res://addons/godot-livekit/bin/livekit_ffi.dll": "", "res://addons/godot-livekit/bin/livekit.dll": ""}
-windows.release.x86_64 = {"res://addons/godot-livekit/bin/livekit_ffi.dll": "", "res://addons/godot-livekit/bin/livekit.dll": ""}
-macos.debug = {"res://addons/godot-livekit/bin/liblivekit_ffi.dylib": "", "res://addons/godot-livekit/bin/liblivekit.dylib": ""}
-macos.release = {"res://addons/godot-livekit/bin/liblivekit_ffi.dylib": "", "res://addons/godot-livekit/bin/liblivekit.dylib": ""}
+linux.x86_64 = {"res://addons/godot-livekit/bin/liblivekit_ffi.so": "", "res://addons/godot-livekit/bin/liblivekit.so": ""}
+windows.x86_64 = {"res://addons/godot-livekit/bin/livekit_ffi.dll": "", "res://addons/godot-livekit/bin/livekit.dll": ""}
+macos = {"res://addons/godot-livekit/bin/liblivekit_ffi.dylib": "", "res://addons/godot-livekit/bin/liblivekit.dylib": ""}

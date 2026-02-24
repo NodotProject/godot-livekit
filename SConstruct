@@ -74,6 +74,9 @@ else:
         else:
             env.Append(CCFLAGS=['-arch', arch])
             env.Append(LINKFLAGS=['-arch', arch])
+        env.Append(LINKFLAGS=['-Wl,-rpath,@loader_path'])
+    elif platform == 'linux':
+        env.Append(LINKFLAGS=['-Wl,-rpath,$ORIGIN'])
 
 if is_windows and not use_mingw:
     lib_ext = '.lib'
@@ -146,11 +149,13 @@ else:
     env['SHLIBPREFIX'] = 'lib'
     env['SHLIBSUFFIX'] = '.so'
 
-lib_name = f"godot-livekit.{platform}.{target}.{arch}"
+lib_name = f"godot-livekit.{platform}.{arch}"
 if platform == 'windows' and not lib_name.endswith('.dll'):
     lib_name += '.dll'
 elif platform == 'macos' and not lib_name.endswith('.dylib'):
     lib_name += '.dylib'
+elif platform == 'linux' and not lib_name.endswith('.so'):
+    lib_name += '.so'
 library = env.SharedLibrary(target=lib_name, source=src_files)
 installed_library = env.Install('addons/godot-livekit/bin', library)
 Default(installed_library)
