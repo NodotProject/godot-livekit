@@ -10,6 +10,9 @@
 #include <livekit/room.h>
 #include <livekit/room_delegate.h>
 
+#include <thread>
+#include <atomic>
+
 #include "livekit_participant.h"
 #ifdef LIVEKIT_E2EE_SUPPORTED
 #include "livekit_e2ee.h"
@@ -74,6 +77,10 @@ private:
     Ref<LiveKitLocalParticipant> local_participant;
     Dictionary remote_participants;
     ConnectionState connection_state = STATE_DISCONNECTED;
+
+    // Background connection threading
+    std::thread connect_thread_;
+    std::atomic<bool> connecting_async_{false};
 #ifdef LIVEKIT_E2EE_SUPPORTED
     Ref<LiveKitE2eeManager> e2ee_manager_;
 #endif
@@ -89,6 +96,7 @@ public:
 
     bool connect_to_room(const String &url, const String &token, const Dictionary &options);
     void disconnect_from_room();
+    void _finalize_connection(bool success);
 
     Ref<LiveKitLocalParticipant> get_local_participant() const;
     Dictionary get_remote_participants() const;

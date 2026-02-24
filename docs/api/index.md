@@ -84,7 +84,7 @@ Represents the local user. Handles publishing tracks, data, and RPC.
 *   `get_track_publications() -> Dictionary`: Returns published track publications.
 *   `publish_track(track: LiveKitTrack, options: Dictionary) -> LiveKitLocalTrackPublication`: Publishes a local track to the room.
 *   `unpublish_track(track_sid: String)`: Unpublishes a track by its SID.
-*   `perform_rpc(destination: String, method: String, payload: String, timeout: float) -> String`: Performs a remote procedure call to another participant.
+*   `perform_rpc(destination: String, method: String, payload: String, timeout: float)`: Performs an asynchronous remote procedure call to another participant. The result is delivered via the `rpc_response_received` signal; errors via the `rpc_error` signal.
 *   `register_rpc_method(method: String)`: Registers a method name to receive RPC calls.
 *   `unregister_rpc_method(method: String)`: Unregisters an RPC method.
 *   `respond_to_rpc(request_id: String, payload: String)`: Responds to an incoming RPC request.
@@ -92,6 +92,8 @@ Represents the local user. Handles publishing tracks, data, and RPC.
 
 **Signals:**
 *   `rpc_method_invoked(method: String, request_id: String, caller_identity: String, payload: String, response_timeout: float)`: Emitted when an RPC method is invoked by a remote participant. Use `respond_to_rpc()` or `respond_to_rpc_error()` with the `request_id` to reply.
+*   `rpc_response_received(method: String, result: String)`: Emitted when an outgoing RPC call succeeds. Contains the method name and the response payload.
+*   `rpc_error(method: String, error_message: String)`: Emitted when an outgoing RPC call fails.
 
 ### `LiveKitRemoteParticipant` (Inherits `LiveKitParticipant`)
 Represents a remote user.
@@ -113,7 +115,10 @@ Base class for media tracks.
 *   `get_source() -> int`: Returns the track source (see `TrackSource` enum).
 *   `get_muted() -> bool`: Returns whether the track is muted.
 *   `get_stream_state() -> int`: Returns the track's stream state (see `StreamState` enum).
-*   `get_stats() -> Array`: Returns an array of dictionaries containing WebRTC statistics (inbound/outbound RTP, codec, transport, candidate pair metrics, etc.).
+*   `request_stats()`: Requests WebRTC statistics for this track asynchronously. Results are delivered via the `stats_received` signal.
+
+**Signals:**
+*   `stats_received(stats: Array)`: Emitted with an array of dictionaries containing WebRTC statistics (inbound/outbound RTP, codec, transport, candidate pair metrics, etc.).
 
 **Enums:**
 *   `TrackKind`: `KIND_UNKNOWN = 0`, `KIND_AUDIO = 1`, `KIND_VIDEO = 2`

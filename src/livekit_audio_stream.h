@@ -28,6 +28,7 @@ private:
     std::vector<float> audio_buffer_;
     std::thread reader_thread_;
     std::atomic<bool> running_{false};
+    std::atomic<bool> thread_exited_{false};
     int sample_rate_ = 48000;
     int num_channels_ = 1;
 

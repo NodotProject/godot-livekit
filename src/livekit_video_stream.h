@@ -29,6 +29,7 @@ private:
     std::unique_ptr<livekit::VideoFrame> pending_frame_;
     std::thread reader_thread_;
     std::atomic<bool> running_{false};
+    std::atomic<bool> thread_exited_{false};
 
     void _reader_loop();
 

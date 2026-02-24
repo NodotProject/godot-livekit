@@ -256,7 +256,7 @@ void LiveKitTrack::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_source"), &LiveKitTrack::get_source);
     ClassDB::bind_method(D_METHOD("get_muted"), &LiveKitTrack::get_muted);
     ClassDB::bind_method(D_METHOD("get_stream_state"), &LiveKitTrack::get_stream_state);
-    ClassDB::bind_method(D_METHOD("get_stats"), &LiveKitTrack::get_stats);
+    ClassDB::bind_method(D_METHOD("request_stats"), &LiveKitTrack::request_stats);
 
     ADD_PROPERTY(PropertyInfo(Variant::STRING, "sid"), "", "get_sid");
     ADD_PROPERTY(PropertyInfo(Variant::STRING, "name"), "", "get_name");
@@ -264,6 +264,9 @@ void LiveKitTrack::_bind_methods() {
     ADD_PROPERTY(PropertyInfo(Variant::INT, "source"), "", "get_source");
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "muted"), "", "get_muted");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "stream_state"), "", "get_stream_state");
+
+    ADD_SIGNAL(MethodInfo("stats_received",
+            PropertyInfo(Variant::ARRAY, "stats")));
 
     BIND_ENUM_CONSTANT(KIND_UNKNOWN);
     BIND_ENUM_CONSTANT(KIND_AUDIO);
@@ -335,29 +338,32 @@ int LiveKitTrack::get_stream_state() const {
     return STATE_UNKNOWN;
 }
 
-Array LiveKitTrack::get_stats() const {
-    Array result;
+void LiveKitTrack::request_stats() {
     if (!track_) {
-        return result;
+        return;
     }
 
-    try {
-        auto future = track_->getStats();
-        // Wait for the stats with a timeout
-        auto status = future.wait_for(std::chrono::seconds(5));
-        if (status == std::future_status::ready) {
-            auto stats_vec = future.get();
-            for (const auto &stats : stats_vec) {
-                result.push_back(stats_variant_to_dict(stats));
+    // Capture shared_ptr so the native track stays alive for the duration
+    std::shared_ptr<livekit::Track> track_copy = track_;
+
+    std::thread([this, track_copy]() {
+        try {
+            auto future = track_copy->getStats();
+            auto status = future.wait_for(std::chrono::seconds(5));
+            if (status == std::future_status::ready) {
+                auto stats_vec = future.get();
+                Array result;
+                for (const auto &stats : stats_vec) {
+                    result.push_back(stats_variant_to_dict(stats));
+                }
+                call_deferred("emit_signal", "stats_received", result);
+            } else {
+                UtilityFunctions::printerr("LiveKitTrack::request_stats: timed out waiting for stats");
             }
-        } else {
-            UtilityFunctions::printerr("LiveKitTrack::get_stats: timed out waiting for stats");
+        } catch (const std::exception &e) {
+            UtilityFunctions::printerr("LiveKitTrack::request_stats: error: ", String(e.what()));
         }
-    } catch (const std::exception &e) {
-        UtilityFunctions::printerr("LiveKitTrack::get_stats: error: ", String(e.what()));
-    }
-
-    return result;
+    }).detach();
 }
 
 // LiveKitLocalAudioTrack

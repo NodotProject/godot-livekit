@@ -20,6 +20,7 @@ using namespace godot;
 void LiveKitRoom::_bind_methods() {
     ClassDB::bind_method(D_METHOD("connect_to_room", "url", "token", "options"), &LiveKitRoom::connect_to_room);
     ClassDB::bind_method(D_METHOD("disconnect_from_room"), &LiveKitRoom::disconnect_from_room);
+    ClassDB::bind_method(D_METHOD("_finalize_connection", "success"), &LiveKitRoom::_finalize_connection);
     ClassDB::bind_method(D_METHOD("get_local_participant"), &LiveKitRoom::get_local_participant);
     ClassDB::bind_method(D_METHOD("get_remote_participants"), &LiveKitRoom::get_remote_participants);
     ClassDB::bind_method(D_METHOD("get_sid"), &LiveKitRoom::get_sid);
@@ -127,6 +128,9 @@ LiveKitRoom::LiveKitRoom() {
 }
 
 LiveKitRoom::~LiveKitRoom() {
+    if (connect_thread_.joinable()) {
+        connect_thread_.join();
+    }
     if (room) {
         delete room;
         room = nullptr;
@@ -155,7 +159,35 @@ bool LiveKitRoom::connect_to_room(const String &url, const String &token, const 
     }
 #endif
 
-    bool success = room->Connect(url.utf8().get_data(), token.utf8().get_data(), room_options);
+    // Join any previous connect thread before starting a new one
+    if (connect_thread_.joinable()) {
+        connect_thread_.join();
+    }
+
+    // Suppress the delegate's "connected" signal during async connect;
+    // _finalize_connection will emit it after participant init.
+    connecting_async_ = true;
+
+    std::string url_str(url.utf8().get_data());
+    std::string token_str(token.utf8().get_data());
+
+    // Run the blocking Connect() on a background thread so the main
+    // thread (and Godot's rendering/input loop) stays responsive.
+    connect_thread_ = std::thread([this, url_str, token_str, room_options]() {
+        bool success = room->Connect(url_str.c_str(), token_str.c_str(), room_options);
+        call_deferred("_finalize_connection", success);
+    });
+
+    return true; // "connection started" — result arrives via signals
+}
+
+void LiveKitRoom::_finalize_connection(bool success) {
+    connecting_async_ = false;
+
+    if (connect_thread_.joinable()) {
+        connect_thread_.join();
+    }
+
     if (success) {
         connection_state = STATE_CONNECTED;
 
@@ -185,11 +217,21 @@ bool LiveKitRoom::connect_to_room(const String &url, const String &token, const 
             e2ee_manager_->bind_manager(mgr);
         }
 #endif
+
+        emit_signal("connected");
+    } else {
+        connection_state = STATE_DISCONNECTED;
+        emit_signal("disconnected");
     }
-    return success;
 }
 
 void LiveKitRoom::disconnect_from_room() {
+    connecting_async_ = false;
+    // Must join: the connect thread accesses `room` which is deleted below.
+    // If still connecting, this blocks until Connect() finishes or times out.
+    if (connect_thread_.joinable()) {
+        connect_thread_.join();
+    }
     // SDK has no explicit disconnect; destroying the Room disconnects
     local_participant.unref();
     remote_participants.clear();
@@ -302,10 +344,16 @@ void LiveKitRoom::GodotRoomDelegate::onParticipantDisconnected(livekit::Room &r,
 void LiveKitRoom::GodotRoomDelegate::onConnectionStateChanged(livekit::Room &r, const livekit::ConnectionStateChangedEvent &e) {
     if (e.state == livekit::ConnectionState::Connected) {
         room->connection_state = STATE_CONNECTED;
-        room->call_deferred("emit_signal", "connected");
+        // When connecting_async_ is set, _finalize_connection emits
+        // "connected" after participant initialization on the main thread.
+        if (!room->connecting_async_.load()) {
+            room->call_deferred("emit_signal", "connected");
+        }
     } else if (e.state == livekit::ConnectionState::Disconnected) {
         room->connection_state = STATE_DISCONNECTED;
-        room->call_deferred("emit_signal", "disconnected");
+        if (!room->connecting_async_.load()) {
+            room->call_deferred("emit_signal", "disconnected");
+        }
     } else if (e.state == livekit::ConnectionState::Reconnecting) {
         room->connection_state = STATE_RECONNECTING;
     }

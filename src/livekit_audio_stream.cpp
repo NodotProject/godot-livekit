@@ -54,6 +54,7 @@ void LiveKitAudioStream::_reader_loop() {
             audio_buffer_.insert(audio_buffer_.end(), float_samples.begin(), float_samples.end());
         }
     }
+    thread_exited_.store(true);
 }
 
 Ref<LiveKitAudioStream> LiveKitAudioStream::from_track(const Ref<LiveKitTrack> &track) {
@@ -120,7 +121,10 @@ int LiveKitAudioStream::poll(const Ref<AudioStreamGeneratorPlayback> &playback) 
 
     std::vector<float> buffer;
     {
-        std::lock_guard<std::mutex> lock(audio_mutex_);
+        std::unique_lock<std::mutex> lock(audio_mutex_, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            return 0; // Reader thread holds the lock; skip this frame
+        }
         buffer.swap(audio_buffer_);
     }
 
@@ -171,7 +175,16 @@ void LiveKitAudioStream::close() {
         stream_->close();
     }
     if (reader_thread_.joinable()) {
-        reader_thread_.join();
+        // stream_->close() should make read() return false almost immediately.
+        // Brief poll as a safety net; detach if the thread doesn't exit.
+        for (int i = 0; i < 20 && !thread_exited_.load(); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (thread_exited_.load()) {
+            reader_thread_.join();
+        } else {
+            reader_thread_.detach();
+        }
     }
     stream_.reset();
 }

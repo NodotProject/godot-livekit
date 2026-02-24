@@ -112,6 +112,14 @@ void LiveKitLocalParticipant::_bind_methods() {
             PropertyInfo(Variant::STRING, "caller_identity"),
             PropertyInfo(Variant::STRING, "payload"),
             PropertyInfo(Variant::FLOAT, "response_timeout")));
+
+    ADD_SIGNAL(MethodInfo("rpc_response_received",
+            PropertyInfo(Variant::STRING, "method"),
+            PropertyInfo(Variant::STRING, "result")));
+
+    ADD_SIGNAL(MethodInfo("rpc_error",
+            PropertyInfo(Variant::STRING, "method"),
+            PropertyInfo(Variant::STRING, "error_message")));
 }
 
 LiveKitLocalParticipant::LiveKitLocalParticipant() {
@@ -234,23 +242,31 @@ void LiveKitLocalParticipant::unpublish_track(const String &track_sid) {
 
 // RPC
 
-String LiveKitLocalParticipant::perform_rpc(const String &destination, const String &method, const String &payload, double timeout) {
+void LiveKitLocalParticipant::perform_rpc(const String &destination, const String &method, const String &payload, double timeout) {
     if (!local_participant_) {
         UtilityFunctions::printerr("LiveKitLocalParticipant::perform_rpc: not bound");
-        return String();
+        return;
     }
 
-    try {
-        std::string result = local_participant_->performRpc(
-                std::string(destination.utf8().get_data()),
-                std::string(method.utf8().get_data()),
-                std::string(payload.utf8().get_data()),
-                timeout);
-        return String(result.c_str());
-    } catch (const livekit::RpcError &e) {
-        UtilityFunctions::printerr("LiveKitLocalParticipant::perform_rpc error: ", String(e.message().c_str()));
-        return String();
-    }
+    // Capture copies for the background thread
+    std::string dest_str(destination.utf8().get_data());
+    std::string method_str(method.utf8().get_data());
+    std::string payload_str(payload.utf8().get_data());
+    String method_for_signal = method;
+
+    // Run the blocking SDK call on a background thread; deliver the result
+    // back to the main thread via signal (call_deferred is thread-safe).
+    std::thread([this, dest_str, method_str, payload_str, timeout, method_for_signal]() {
+        try {
+            std::string result = local_participant_->performRpc(
+                    dest_str, method_str, payload_str, timeout);
+            call_deferred("emit_signal", "rpc_response_received",
+                    method_for_signal, String(result.c_str()));
+        } catch (const livekit::RpcError &e) {
+            call_deferred("emit_signal", "rpc_error",
+                    method_for_signal, String(e.message().c_str()));
+        }
+    }).detach();
 }
 
 void LiveKitLocalParticipant::register_rpc_method(const String &method) {

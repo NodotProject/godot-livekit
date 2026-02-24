@@ -37,6 +37,7 @@ void LiveKitVideoStream::_reader_loop() {
             pending_frame_ = std::move(frame);
         }
     }
+    thread_exited_.store(true);
 }
 
 Ref<LiveKitVideoStream> LiveKitVideoStream::from_track(const Ref<LiveKitTrack> &track) {
@@ -100,9 +101,9 @@ bool LiveKitVideoStream::poll() {
     std::unique_ptr<livekit::VideoFrame> frame;
 
     {
-        std::lock_guard<std::mutex> lock(frame_mutex_);
-        if (!pending_frame_) {
-            return false;
+        std::unique_lock<std::mutex> lock(frame_mutex_, std::try_to_lock);
+        if (!lock.owns_lock() || !pending_frame_) {
+            return false; // Reader thread holds the lock or no frame; skip
         }
         frame = std::move(pending_frame_);
     }
@@ -134,7 +135,16 @@ void LiveKitVideoStream::close() {
         stream_->close();
     }
     if (reader_thread_.joinable()) {
-        reader_thread_.join();
+        // stream_->close() should make read() return false almost immediately.
+        // Brief poll as a safety net; detach if the thread doesn't exit.
+        for (int i = 0; i < 20 && !thread_exited_.load(); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (thread_exited_.load()) {
+            reader_thread_.join();
+        } else {
+            reader_thread_.detach();
+        }
     }
     stream_.reset();
 }

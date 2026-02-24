@@ -13,6 +13,7 @@
 #include <livekit/remote_video_track.h>
 
 #include <memory>
+#include <thread>
 
 namespace godot {
 
@@ -61,7 +62,7 @@ public:
     bool get_muted() const;
     int get_stream_state() const;
 
-    Array get_stats() const;
+    void request_stats();
 };
 
 class LiveKitLocalAudioTrack : public LiveKitTrack {

@@ -11,6 +11,8 @@
 #include <livekit/local_participant.h>
 #include <livekit/remote_participant.h>
 
+#include <thread>
+
 namespace godot {
 
 class LiveKitTrack;
@@ -71,8 +73,8 @@ public:
     Ref<LiveKitLocalTrackPublication> publish_track(const Ref<LiveKitTrack> &track, const Dictionary &options);
     void unpublish_track(const String &track_sid);
 
-    // RPC
-    String perform_rpc(const String &destination, const String &method, const String &payload, double timeout);
+    // RPC (async — result delivered via rpc_response_received / rpc_error signals)
+    void perform_rpc(const String &destination, const String &method, const String &payload, double timeout);
     void register_rpc_method(const String &method);
     void unregister_rpc_method(const String &method);
     void respond_to_rpc(const String &request_id, const String &payload);

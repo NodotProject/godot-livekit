@@ -102,14 +102,24 @@ func setup_rpc():
     room.get_local_participant().register_rpc_method("greet")
     room.get_local_participant().rpc_method_invoked.connect(_on_rpc_invoked)
 
+    # Connect signals for outgoing RPC results
+    room.get_local_participant().rpc_response_received.connect(_on_rpc_response)
+    room.get_local_participant().rpc_error.connect(_on_rpc_error)
+
 func _on_rpc_invoked(method, request_id, caller_identity, payload, response_timeout):
     print("RPC from ", caller_identity, ": ", method, " -> ", payload)
     # Respond to the caller
     room.get_local_participant().respond_to_rpc(request_id, "Hello back!")
 
 func call_remote_greet(target_identity: String):
-    var response = room.get_local_participant().perform_rpc(target_identity, "greet", "Hello!", 10.0)
-    print("RPC response: ", response)
+    # perform_rpc is async — the result arrives via rpc_response_received signal
+    room.get_local_participant().perform_rpc(target_identity, "greet", "Hello!", 10.0)
+
+func _on_rpc_response(method, result):
+    print("RPC response for ", method, ": ", result)
+
+func _on_rpc_error(method, error_message):
+    print("RPC error for ", method, ": ", error_message)
 ```
 
 ## End-to-End Encryption (E2EE)
@@ -144,8 +154,12 @@ To monitor WebRTC connection quality:
 
 ```gdscript
 func _on_track_subscribed(track, publication, participant):
-    # Get detailed WebRTC statistics for a track
-    var stats = track.get_stats()
+    # Connect the signal to receive stats asynchronously
+    track.stats_received.connect(_on_stats_received)
+    # Request stats (non-blocking)
+    track.request_stats()
+
+func _on_stats_received(stats):
     for stat in stats:
         print(stat)
 ```
