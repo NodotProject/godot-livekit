@@ -10,6 +10,8 @@
 - **Full Track Support**: Publish and subscribe to audio/video tracks, with local sources for capturing from Godot.
 - **Data Channels**: Send and receive arbitrary data messages with reliable or unreliable delivery.
 - **RPC Support**: Perform remote procedure calls between participants.
+- **End-to-End Encryption (E2EE)**: Secure your media streams with configurable encryption, key management, and per-participant frame cryptors.
+- **Connection Statistics**: Access detailed WebRTC statistics including inbound/outbound RTP, codecs, transport, and candidate pair metrics.
 - **Fast Build Times**: Uses prebuilt binaries for both `godot-cpp` and the LiveKit C++ SDK, reducing compilation time to seconds instead of hours.
 - **Cross-Platform**: Supports Linux, macOS (Universal), and Windows.
 - **Native GDExtension**: Works out-of-the-box with Godot 4.5 without requiring custom engine builds.

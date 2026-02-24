@@ -118,16 +118,16 @@ To ensure steady progress and maintainable code, the development will be broken 
 - Implement `LiveKitAudioSource` with `capture_frame()` accepting `PackedFloat32Array`.
 - Bind `local_participant.publish_track()` and `unpublish_track()`.
 
-### Phase 7: Advanced Features (Partial)
+### Phase 7: Advanced Features ✅
 **Goal**: Polish and complete the API.
 - ✅ Implement RPC methods (`perform_rpc`, `register_rpc_method`, `respond_to_rpc`).
-- ⬜ Expose End-to-End Encryption (E2EE) classes and setup.
-- ⬜ Gather and expose network/webrtc connection statistics (`livekit::Stats`).
+- ✅ Expose End-to-End Encryption (E2EE) classes and setup (`LiveKitE2eeOptions`, `LiveKitE2eeManager`, `LiveKitKeyProvider`, `LiveKitFrameCryptor`).
+- ✅ Gather and expose network/webrtc connection statistics via `LiveKitTrack.get_stats()`.
 
-### Phase 8: Exporting & Packaging
+### Phase 8: Exporting & Packaging ✅
 **Goal**: Ensure the GDExtension can be successfully exported with Godot projects across target platforms.
-- Configure `godot-livekit.gdextension` to correctly map and bundle the pre-built LiveKit dynamic libraries (`.dll`, `.so`, `.dylib`, frameworks) alongside the extension binaries.
-- Ensure dependency paths for shared libraries are correctly set up (e.g., using `@rpath` on macOS) so they are found at runtime in exported builds.
+- ✅ Configure `godot-livekit.gdextension` to correctly map and bundle the pre-built LiveKit dynamic libraries (`.dll`, `.so`, `.dylib`, frameworks) alongside the extension binaries via `[dependencies]` section.
+- ✅ Ensure dependency paths for shared libraries are correctly set up so they are found at runtime in exported builds.
 
 ---
 

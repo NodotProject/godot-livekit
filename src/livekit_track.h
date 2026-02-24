@@ -3,6 +3,7 @@
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include <livekit/track.h>
@@ -59,6 +60,8 @@ public:
     int get_source() const;
     bool get_muted() const;
     int get_stream_state() const;
+
+    Array get_stats() const;
 };
 
 class LiveKitLocalAudioTrack : public LiveKitTrack {

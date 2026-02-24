@@ -3,8 +3,249 @@
 #include "livekit_video_source.h"
 
 #include <godot_cpp/variant/utility_functions.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
+
+#include <livekit/stats.h>
+
+#include <chrono>
+#include <variant>
 
 using namespace godot;
+
+namespace {
+
+Dictionary rtc_stats_data_to_dict(const livekit::RtcStatsData &d) {
+    Dictionary dict;
+    dict["id"] = String(d.id.c_str());
+    dict["timestamp_ms"] = d.timestamp_ms;
+    return dict;
+}
+
+Dictionary inbound_rtp_to_dict(const livekit::RtcInboundRtpStats &s) {
+    Dictionary dict;
+    dict["type"] = "inbound_rtp";
+    dict["id"] = String(s.rtc.id.c_str());
+    dict["timestamp_ms"] = s.rtc.timestamp_ms;
+    dict["ssrc"] = (int)s.stream.ssrc;
+    dict["kind"] = String(s.stream.kind.c_str());
+    dict["transport_id"] = String(s.stream.transport_id.c_str());
+    dict["codec_id"] = String(s.stream.codec_id.c_str());
+    dict["packets_received"] = (int64_t)s.received.packets_received;
+    dict["packets_lost"] = (int64_t)s.received.packets_lost;
+    dict["jitter"] = s.received.jitter;
+    dict["track_identifier"] = String(s.inbound.track_identifier.c_str());
+    dict["frames_decoded"] = (int)s.inbound.frames_decoded;
+    dict["frames_dropped"] = (int)s.inbound.frames_dropped;
+    dict["frame_width"] = (int)s.inbound.frame_width;
+    dict["frame_height"] = (int)s.inbound.frame_height;
+    dict["frames_per_second"] = s.inbound.frames_per_second;
+    dict["bytes_received"] = (int64_t)s.inbound.bytes_received;
+    dict["nack_count"] = (int)s.inbound.nack_count;
+    dict["pli_count"] = (int)s.inbound.pli_count;
+    dict["fir_count"] = (int)s.inbound.fir_count;
+    dict["freeze_count"] = (int)s.inbound.freeze_count;
+    dict["total_freeze_duration"] = s.inbound.total_freeze_duration;
+    dict["audio_level"] = s.inbound.audio_level;
+    dict["total_audio_energy"] = s.inbound.total_audio_energy;
+    dict["total_samples_duration"] = s.inbound.total_samples_duration;
+    dict["concealed_samples"] = (int64_t)s.inbound.concealed_samples;
+    dict["jitter_buffer_delay"] = s.inbound.jitter_buffer_delay;
+    return dict;
+}
+
+Dictionary outbound_rtp_to_dict(const livekit::RtcOutboundRtpStats &s) {
+    Dictionary dict;
+    dict["type"] = "outbound_rtp";
+    dict["id"] = String(s.rtc.id.c_str());
+    dict["timestamp_ms"] = s.rtc.timestamp_ms;
+    dict["ssrc"] = (int)s.stream.ssrc;
+    dict["kind"] = String(s.stream.kind.c_str());
+    dict["transport_id"] = String(s.stream.transport_id.c_str());
+    dict["codec_id"] = String(s.stream.codec_id.c_str());
+    dict["packets_sent"] = (int64_t)s.sent.packets_sent;
+    dict["bytes_sent"] = (int64_t)s.sent.bytes_sent;
+    dict["frame_width"] = (int)s.outbound.frame_width;
+    dict["frame_height"] = (int)s.outbound.frame_height;
+    dict["frames_per_second"] = s.outbound.frames_per_second;
+    dict["frames_sent"] = (int)s.outbound.frames_sent;
+    dict["frames_encoded"] = (int)s.outbound.frames_encoded;
+    dict["key_frames_encoded"] = (int)s.outbound.key_frames_encoded;
+    dict["target_bitrate"] = s.outbound.target_bitrate;
+    dict["total_encode_time"] = s.outbound.total_encode_time;
+    dict["total_packet_send_delay"] = s.outbound.total_packet_send_delay;
+    dict["quality_limitation_reason"] = (int)s.outbound.quality_limitation_reason;
+    dict["nack_count"] = (int)s.outbound.nack_count;
+    dict["pli_count"] = (int)s.outbound.pli_count;
+    dict["fir_count"] = (int)s.outbound.fir_count;
+    dict["active"] = s.outbound.active;
+    dict["retransmitted_packets_sent"] = (int64_t)s.outbound.retransmitted_packets_sent;
+    dict["retransmitted_bytes_sent"] = (int64_t)s.outbound.retransmitted_bytes_sent;
+    return dict;
+}
+
+Dictionary remote_inbound_rtp_to_dict(const livekit::RtcRemoteInboundRtpStats &s) {
+    Dictionary dict;
+    dict["type"] = "remote_inbound_rtp";
+    dict["id"] = String(s.rtc.id.c_str());
+    dict["timestamp_ms"] = s.rtc.timestamp_ms;
+    dict["ssrc"] = (int)s.stream.ssrc;
+    dict["kind"] = String(s.stream.kind.c_str());
+    dict["packets_received"] = (int64_t)s.received.packets_received;
+    dict["packets_lost"] = (int64_t)s.received.packets_lost;
+    dict["jitter"] = s.received.jitter;
+    dict["round_trip_time"] = s.remote_inbound.round_trip_time;
+    dict["total_round_trip_time"] = s.remote_inbound.total_round_trip_time;
+    dict["fraction_lost"] = s.remote_inbound.fraction_lost;
+    dict["round_trip_time_measurements"] = (int64_t)s.remote_inbound.round_trip_time_measurements;
+    return dict;
+}
+
+Dictionary remote_outbound_rtp_to_dict(const livekit::RtcRemoteOutboundRtpStats &s) {
+    Dictionary dict;
+    dict["type"] = "remote_outbound_rtp";
+    dict["id"] = String(s.rtc.id.c_str());
+    dict["timestamp_ms"] = s.rtc.timestamp_ms;
+    dict["ssrc"] = (int)s.stream.ssrc;
+    dict["kind"] = String(s.stream.kind.c_str());
+    dict["packets_sent"] = (int64_t)s.sent.packets_sent;
+    dict["bytes_sent"] = (int64_t)s.sent.bytes_sent;
+    dict["remote_timestamp"] = s.remote_outbound.remote_timestamp;
+    dict["round_trip_time"] = s.remote_outbound.round_trip_time;
+    dict["total_round_trip_time"] = s.remote_outbound.total_round_trip_time;
+    return dict;
+}
+
+Dictionary codec_to_dict(const livekit::RtcCodecStats &s) {
+    Dictionary dict;
+    dict["type"] = "codec";
+    dict["id"] = String(s.rtc.id.c_str());
+    dict["timestamp_ms"] = s.rtc.timestamp_ms;
+    dict["payload_type"] = (int)s.codec.payload_type;
+    dict["mime_type"] = String(s.codec.mime_type.c_str());
+    dict["clock_rate"] = (int)s.codec.clock_rate;
+    dict["channels"] = (int)s.codec.channels;
+    return dict;
+}
+
+Dictionary transport_to_dict(const livekit::RtcTransportStats &s) {
+    Dictionary dict;
+    dict["type"] = "transport";
+    dict["id"] = String(s.rtc.id.c_str());
+    dict["timestamp_ms"] = s.rtc.timestamp_ms;
+    dict["packets_sent"] = (int64_t)s.transport.packets_sent;
+    dict["packets_received"] = (int64_t)s.transport.packets_received;
+    dict["bytes_sent"] = (int64_t)s.transport.bytes_sent;
+    dict["bytes_received"] = (int64_t)s.transport.bytes_received;
+    dict["dtls_cipher"] = String(s.transport.dtls_cipher.c_str());
+    dict["srtp_cipher"] = String(s.transport.srtp_cipher.c_str());
+    return dict;
+}
+
+Dictionary candidate_pair_to_dict(const livekit::RtcCandidatePairStats &s) {
+    Dictionary dict;
+    dict["type"] = "candidate_pair";
+    dict["id"] = String(s.rtc.id.c_str());
+    dict["timestamp_ms"] = s.rtc.timestamp_ms;
+    dict["bytes_sent"] = (int64_t)s.candidate_pair.bytes_sent;
+    dict["bytes_received"] = (int64_t)s.candidate_pair.bytes_received;
+    dict["total_round_trip_time"] = s.candidate_pair.total_round_trip_time;
+    dict["current_round_trip_time"] = s.candidate_pair.current_round_trip_time;
+    dict["available_outgoing_bitrate"] = s.candidate_pair.available_outgoing_bitrate;
+    dict["available_incoming_bitrate"] = s.candidate_pair.available_incoming_bitrate;
+    dict["nominated"] = s.candidate_pair.nominated;
+    return dict;
+}
+
+Dictionary stats_variant_to_dict(const livekit::RtcStats &stats) {
+    return std::visit([](auto &&s) -> Dictionary {
+        using T = std::decay_t<decltype(s)>;
+        if constexpr (std::is_same_v<T, livekit::RtcInboundRtpStats>) {
+            return inbound_rtp_to_dict(s);
+        } else if constexpr (std::is_same_v<T, livekit::RtcOutboundRtpStats>) {
+            return outbound_rtp_to_dict(s);
+        } else if constexpr (std::is_same_v<T, livekit::RtcRemoteInboundRtpStats>) {
+            return remote_inbound_rtp_to_dict(s);
+        } else if constexpr (std::is_same_v<T, livekit::RtcRemoteOutboundRtpStats>) {
+            return remote_outbound_rtp_to_dict(s);
+        } else if constexpr (std::is_same_v<T, livekit::RtcCodecStats>) {
+            return codec_to_dict(s);
+        } else if constexpr (std::is_same_v<T, livekit::RtcTransportStats>) {
+            return transport_to_dict(s);
+        } else if constexpr (std::is_same_v<T, livekit::RtcCandidatePairStats>) {
+            return candidate_pair_to_dict(s);
+        } else if constexpr (std::is_same_v<T, livekit::RtcMediaSourceStats>) {
+            Dictionary dict;
+            dict["type"] = "media_source";
+            dict["id"] = String(s.rtc.id.c_str());
+            dict["timestamp_ms"] = s.rtc.timestamp_ms;
+            dict["track_identifier"] = String(s.source.track_identifier.c_str());
+            dict["kind"] = String(s.source.kind.c_str());
+            return dict;
+        } else if constexpr (std::is_same_v<T, livekit::RtcMediaPlayoutStats>) {
+            Dictionary dict;
+            dict["type"] = "media_playout";
+            dict["id"] = String(s.rtc.id.c_str());
+            dict["timestamp_ms"] = s.rtc.timestamp_ms;
+            dict["total_samples_duration"] = s.audio_playout.total_samples_duration;
+            dict["total_playout_delay"] = s.audio_playout.total_playout_delay;
+            dict["total_samples_count"] = (int64_t)s.audio_playout.total_samples_count;
+            return dict;
+        } else if constexpr (std::is_same_v<T, livekit::RtcPeerConnectionStats>) {
+            Dictionary dict;
+            dict["type"] = "peer_connection";
+            dict["id"] = String(s.rtc.id.c_str());
+            dict["timestamp_ms"] = s.rtc.timestamp_ms;
+            dict["data_channels_opened"] = (int)s.pc.data_channels_opened;
+            dict["data_channels_closed"] = (int)s.pc.data_channels_closed;
+            return dict;
+        } else if constexpr (std::is_same_v<T, livekit::RtcDataChannelStats>) {
+            Dictionary dict;
+            dict["type"] = "data_channel";
+            dict["id"] = String(s.rtc.id.c_str());
+            dict["timestamp_ms"] = s.rtc.timestamp_ms;
+            dict["label"] = String(s.dc.label.c_str());
+            dict["messages_sent"] = (int)s.dc.messages_sent;
+            dict["bytes_sent"] = (int64_t)s.dc.bytes_sent;
+            dict["messages_received"] = (int)s.dc.messages_received;
+            dict["bytes_received"] = (int64_t)s.dc.bytes_received;
+            return dict;
+        } else if constexpr (std::is_same_v<T, livekit::RtcLocalCandidateStats> || std::is_same_v<T, livekit::RtcRemoteCandidateStats>) {
+            Dictionary dict;
+            if constexpr (std::is_same_v<T, livekit::RtcLocalCandidateStats>) {
+                dict["type"] = "local_candidate";
+            } else {
+                dict["type"] = "remote_candidate";
+            }
+            dict["id"] = String(s.rtc.id.c_str());
+            dict["timestamp_ms"] = s.rtc.timestamp_ms;
+            dict["address"] = String(s.candidate.address.c_str());
+            dict["port"] = s.candidate.port;
+            dict["protocol"] = String(s.candidate.protocol.c_str());
+            return dict;
+        } else if constexpr (std::is_same_v<T, livekit::RtcCertificateStats>) {
+            Dictionary dict;
+            dict["type"] = "certificate";
+            dict["id"] = String(s.rtc.id.c_str());
+            dict["timestamp_ms"] = s.rtc.timestamp_ms;
+            dict["fingerprint"] = String(s.certificate.fingerprint.c_str());
+            dict["fingerprint_algorithm"] = String(s.certificate.fingerprint_algorithm.c_str());
+            return dict;
+        } else if constexpr (std::is_same_v<T, livekit::RtcStreamStats>) {
+            Dictionary dict;
+            dict["type"] = "stream";
+            dict["id"] = String(s.rtc.id.c_str());
+            dict["timestamp_ms"] = s.rtc.timestamp_ms;
+            dict["stream_identifier"] = String(s.stream.stream_identifier.c_str());
+            return dict;
+        } else {
+            Dictionary dict;
+            dict["type"] = "unknown";
+            return dict;
+        }
+    }, stats.stats);
+}
+
+} // anonymous namespace
 
 // LiveKitTrack
 
@@ -15,6 +256,7 @@ void LiveKitTrack::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_source"), &LiveKitTrack::get_source);
     ClassDB::bind_method(D_METHOD("get_muted"), &LiveKitTrack::get_muted);
     ClassDB::bind_method(D_METHOD("get_stream_state"), &LiveKitTrack::get_stream_state);
+    ClassDB::bind_method(D_METHOD("get_stats"), &LiveKitTrack::get_stats);
 
     ADD_PROPERTY(PropertyInfo(Variant::STRING, "sid"), "", "get_sid");
     ADD_PROPERTY(PropertyInfo(Variant::STRING, "name"), "", "get_name");
@@ -91,6 +333,31 @@ int LiveKitTrack::get_stream_state() const {
         return (int)track_->stream_state();
     }
     return STATE_UNKNOWN;
+}
+
+Array LiveKitTrack::get_stats() const {
+    Array result;
+    if (!track_) {
+        return result;
+    }
+
+    try {
+        auto future = track_->getStats();
+        // Wait for the stats with a timeout
+        auto status = future.wait_for(std::chrono::seconds(5));
+        if (status == std::future_status::ready) {
+            auto stats_vec = future.get();
+            for (const auto &stats : stats_vec) {
+                result.push_back(stats_variant_to_dict(stats));
+            }
+        } else {
+            UtilityFunctions::printerr("LiveKitTrack::get_stats: timed out waiting for stats");
+        }
+    } catch (const std::exception &e) {
+        UtilityFunctions::printerr("LiveKitTrack::get_stats: error: ", String(e.what()));
+    }
+
+    return result;
 }
 
 // LiveKitLocalAudioTrack

@@ -26,6 +26,7 @@ Represents a LiveKit room. Handles connecting, disconnecting, and room-level sig
 *   `get_name() -> String`: Returns the room's name.
 *   `get_metadata() -> String`: Returns the room's metadata.
 *   `get_connection_state() -> int`: Returns the current connection state.
+*   `get_e2ee_manager() -> LiveKitE2eeManager`: Returns the E2EE manager for configuring end-to-end encryption.
 
 **Signals:**
 *   `connected`: Emitted when successfully connected to the room.
@@ -48,6 +49,8 @@ Represents a LiveKit room. Handles connecting, disconnecting, and room-level sig
 *   `local_track_published(publication: LiveKitLocalTrackPublication, track: LiveKitTrack)`: Emitted when the local participant publishes a track.
 *   `local_track_unpublished(publication: LiveKitLocalTrackPublication)`: Emitted when the local participant unpublishes a track.
 *   `data_received(data: PackedByteArray, participant: LiveKitRemoteParticipant, kind: int, topic: String)`: Emitted when a data message is received.
+*   `e2ee_state_changed(participant: LiveKitParticipant, state: int)`: Emitted when a participant's E2EE state changes.
+*   `participant_encryption_status_changed(participant: LiveKitParticipant, is_encrypted: bool)`: Emitted when a participant's encryption status changes.
 
 **Enums:**
 *   `ConnectionState`: `STATE_DISCONNECTED = 0`, `STATE_CONNECTED = 1`, `STATE_RECONNECTING = 2`
@@ -88,7 +91,7 @@ Represents the local user. Handles publishing tracks, data, and RPC.
 *   `respond_to_rpc_error(request_id: String, code: int, message: String)`: Responds to an incoming RPC request with an error.
 
 **Signals:**
-*   `rpc_method_invoked(...)`: Emitted when an RPC method is invoked by a remote participant.
+*   `rpc_method_invoked(method: String, request_id: String, caller_identity: String, payload: String, response_timeout: float)`: Emitted when an RPC method is invoked by a remote participant. Use `respond_to_rpc()` or `respond_to_rpc_error()` with the `request_id` to reply.
 
 ### `LiveKitRemoteParticipant` (Inherits `LiveKitParticipant`)
 Represents a remote user.
@@ -110,6 +113,7 @@ Base class for media tracks.
 *   `get_source() -> int`: Returns the track source (see `TrackSource` enum).
 *   `get_muted() -> bool`: Returns whether the track is muted.
 *   `get_stream_state() -> int`: Returns the track's stream state (see `StreamState` enum).
+*   `get_stats() -> Array`: Returns an array of dictionaries containing WebRTC statistics (inbound/outbound RTP, codec, transport, candidate pair metrics, etc.).
 
 **Enums:**
 *   `TrackKind`: `KIND_UNKNOWN = 0`, `KIND_AUDIO = 1`, `KIND_VIDEO = 2`
@@ -231,6 +235,52 @@ Receives audio frames from a remote audio track and pipes them into Godot's audi
 
 ---
 
-## Upcoming Classes (Planned)
+## End-to-End Encryption (E2EE)
 
-*   **`LiveKitE2eeOptions`**: End-to-end encryption configuration.
+### `LiveKitE2eeOptions`
+Configuration options for end-to-end encryption. Pass this to the `connect_to_room()` options dictionary under the `"e2ee"` key.
+
+**Methods:**
+*   `set_encryption_type(type: int)`: Sets the encryption type (see `EncryptionType` enum).
+*   `get_encryption_type() -> int`: Returns the current encryption type.
+*   `set_shared_key(key: PackedByteArray)`: Sets the shared encryption key.
+*   `get_shared_key() -> PackedByteArray`: Returns the shared encryption key.
+*   `set_ratchet_salt(salt: PackedByteArray)`: Sets the ratchet salt for key derivation.
+*   `get_ratchet_salt() -> PackedByteArray`: Returns the ratchet salt.
+*   `set_ratchet_window_size(size: int)`: Sets the ratchet window size.
+*   `get_ratchet_window_size() -> int`: Returns the ratchet window size.
+*   `set_failure_tolerance(tolerance: int)`: Sets the number of decryption failures to tolerate before dropping frames.
+*   `get_failure_tolerance() -> int`: Returns the failure tolerance.
+
+**Enums:**
+*   `EncryptionType`: `ENCRYPTION_NONE = 0`, `ENCRYPTION_GCM = 1`, `ENCRYPTION_CUSTOM = 2`
+
+### `LiveKitKeyProvider`
+Manages encryption keys for E2EE. Supports shared keys and per-participant keys with ratcheting.
+
+**Methods:**
+*   `set_shared_key(key: PackedByteArray, key_index: int = 0)`: Sets a shared encryption key at the given index.
+*   `get_shared_key(key_index: int = 0) -> PackedByteArray`: Returns the shared key at the given index.
+*   `ratchet_shared_key(key_index: int = 0) -> PackedByteArray`: Ratchets the shared key and returns the new key.
+*   `set_key(participant_identity: String, key: PackedByteArray, key_index: int = 0)`: Sets an encryption key for a specific participant.
+*   `get_key(participant_identity: String, key_index: int = 0) -> PackedByteArray`: Returns the key for a specific participant.
+*   `ratchet_key(participant_identity: String, key_index: int = 0) -> PackedByteArray`: Ratchets a participant's key and returns the new key.
+
+### `LiveKitFrameCryptor`
+Controls encryption for an individual participant's media frames.
+
+**Methods:**
+*   `get_participant_identity() -> String`: Returns the participant identity this cryptor is associated with.
+*   `get_key_index() -> int`: Returns the current key index.
+*   `get_enabled() -> bool`: Returns whether encryption is enabled for this participant.
+*   `set_enabled(enabled: bool)`: Enables or disables encryption for this participant.
+*   `set_key_index(key_index: int)`: Sets the key index to use for encryption.
+
+### `LiveKitE2eeManager`
+Top-level manager for E2EE. Access via `LiveKitRoom.get_e2ee_manager()`.
+
+**Methods:**
+*   `get_enabled() -> bool`: Returns whether E2EE is enabled.
+*   `set_enabled(enabled: bool)`: Enables or disables E2EE.
+*   `get_key_provider() -> LiveKitKeyProvider`: Returns the key provider for managing encryption keys.
+*   `get_frame_cryptors() -> Array`: Returns an array of `LiveKitFrameCryptor` objects for all participants.

@@ -10,6 +10,8 @@ This GDExtension provides real-time audio, video, and data functionality in Godo
 - Subscribe to and publish audio/video tracks
 - Send and receive data messages
 - Perform remote procedure calls (RPC) between participants
+- Secure media with end-to-end encryption (E2EE) and key management
+- Access detailed WebRTC connection statistics per track
 - Capture audio from Godot's audio system and video from Godot Images
 
 ## Getting Started
