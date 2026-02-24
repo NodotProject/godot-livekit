@@ -76,7 +76,7 @@ else:
             env.Append(LINKFLAGS=['-arch', arch])
         env.Append(LINKFLAGS=['-Wl,-rpath,@loader_path'])
     elif platform == 'linux':
-        env.Append(LINKFLAGS=['-Wl,-rpath,$ORIGIN'])
+        env.Append(LINKFLAGS=['-Wl,-rpath,\\$$ORIGIN'])
 
 if is_windows and not use_mingw:
     lib_ext = '.lib'
