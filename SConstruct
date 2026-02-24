@@ -55,7 +55,7 @@ env.Append(LIBPATH=['godot-cpp/bin', 'livekit-sdk/lib'])
 
 is_windows = platform == 'windows'
 if is_windows and not use_mingw:
-    env.Append(CXXFLAGS=['/std:c++17', '/EHsc', '/MD'])
+    env.Append(CXXFLAGS=['/std:c++17', '/EHsc', '/MT'])
     env.Append(CPPDEFINES=['WIN32', '_WIN32', 'WINDOWS_ENABLED', 'TYPED_METHOD_BIND', 'NOMINMAX'])
 elif is_windows and use_mingw:
     env.Append(CCFLAGS=['-fPIC'])
