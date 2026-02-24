@@ -1,5 +1,7 @@
 # Godot-LiveKit
 
+![Godot-LiveKit Icon](icon.png)
+
 **Godot-LiveKit** is a GDExtension for Godot 4.5 that integrates the [LiveKit C++ SDK](https://github.com/livekit/client-sdk-cpp), allowing you to build real-time voice, video, and data applications directly within the Godot Engine using GDScript or C#.
 
 ## Features
