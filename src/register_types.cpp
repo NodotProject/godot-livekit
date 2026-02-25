@@ -7,6 +7,7 @@
 #include "livekit_audio_stream.h"
 #include "livekit_video_source.h"
 #include "livekit_audio_source.h"
+#include "livekit_screen_capture.h"
 #ifdef LIVEKIT_E2EE_SUPPORTED
 #include "livekit_e2ee.h"
 #endif
@@ -53,6 +54,9 @@ void initialize_livekit_module(ModuleInitializationLevel p_level) {
     // Sources
     ClassDB::register_class<LiveKitVideoSource>();
     ClassDB::register_class<LiveKitAudioSource>();
+
+    // Screen Capture
+    ClassDB::register_class<LiveKitScreenCapture>();
 
 #ifdef LIVEKIT_E2EE_SUPPORTED
     // E2EE

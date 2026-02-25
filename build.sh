@@ -17,6 +17,7 @@ ARCH=""
 SCONS_FLAGS=""
 LIVEKIT_VERSION="0.3.1"
 GODOT_CPP_VERSION="godot-4.5-stable"
+FRAMETAP_VERSION="0.1.0"
 
 # --- Helper Functions ---
 show_usage() {
@@ -124,6 +125,46 @@ fetch_livekit() {
     
     rm "${LIVEKIT_ARCHIVE}"
     echo -e "${GREEN}LiveKit SDK downloaded and extracted successfully!${NC}"
+}
+
+# Function to check if frametap cache is valid
+check_frametap_cache() {
+    echo -e "${YELLOW}Checking frametap cache...${NC}"
+
+    if [ ! -d "frametap/include/frametap" ] || [ ! -d "frametap/lib" ]; then
+        echo -e "${RED}Cache miss: frametap not found${NC}"
+        return 1
+    fi
+
+    echo -e "${GREEN}frametap cache is valid!${NC}"
+    return 0
+}
+
+# Function to download frametap
+fetch_frametap() {
+    echo -e "${YELLOW}Fetching frametap for ${PLATFORM}...${NC}"
+
+    local archive="frametap-${PLATFORM}.zip"
+    local url="https://github.com/krazyjakee/frametap/releases/download/v${FRAMETAP_VERSION}/${archive}"
+
+    rm -rf frametap
+    mkdir -p frametap
+
+    echo -e "${YELLOW}Downloading ${url}...${NC}"
+    curl -sL "${url}" -o "${archive}"
+
+    echo -e "${YELLOW}Extracting...${NC}"
+    unzip -q "${archive}" -d frametap
+
+    # If the zip has a nested directory, flatten it
+    local inner_dir=$(ls frametap)
+    if [ -d "frametap/${inner_dir}/include" ]; then
+        mv frametap/${inner_dir}/* frametap/
+        rm -rf "frametap/${inner_dir}"
+    fi
+
+    rm "${archive}"
+    echo -e "${GREEN}frametap downloaded and extracted successfully!${NC}"
 }
 
 # Function to check if livekit cache is valid
@@ -257,12 +298,18 @@ main() {
 
     install_dependencies
     
+    if ! check_frametap_cache; then
+        fetch_frametap
+    else
+        echo -e "${GREEN}Using cached frametap${NC}"
+    fi
+
     if ! check_livekit_cache; then
         fetch_livekit
     else
         echo -e "${GREEN}Using cached livekit SDK${NC}"
     fi
-    
+
     if ! check_godotcpp_cache; then
         fetch_godotcpp
     else

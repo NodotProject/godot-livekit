@@ -27,6 +27,8 @@ func test_all_classes_registered():
 		# Sources
 		"LiveKitVideoSource",
 		"LiveKitAudioSource",
+		# Screen Capture
+		"LiveKitScreenCapture",
 	]
 
 	for cls in classes:

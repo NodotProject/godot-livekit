@@ -40,10 +40,11 @@ if cache_dir:
 env.Append(CPPPATH=[
     'src',
     '.',
-    'godot-cpp/include', 
-    'godot-cpp/gen/include', 
+    'godot-cpp/include',
+    'godot-cpp/gen/include',
     'godot-cpp/gdextension',
     'livekit-sdk/include',
+    'frametap/include',
 ])
 
 # For Windows cross-compilation with MinGW, point to standard paths
@@ -51,22 +52,22 @@ if use_mingw and is_windows:
     env.Append(CCFLAGS=['--sysroot=/usr/x86_64-w64-mingw32'])
     env.Append(LINKFLAGS=['--sysroot=/usr/x86_64-w64-mingw32'])
 
-env.Append(LIBPATH=['godot-cpp/bin', 'livekit-sdk/lib'])
+env.Append(LIBPATH=['godot-cpp/bin', 'livekit-sdk/lib', 'frametap/lib'])
 
 is_windows = platform == 'windows'
 if is_windows and not use_mingw:
-    env.Append(CXXFLAGS=['/std:c++17', '/EHsc', '/MT'])
+    env.Append(CXXFLAGS=['/std:c++20', '/EHsc', '/MT'])
     env.Append(CPPDEFINES=['WIN32', '_WIN32', 'WINDOWS_ENABLED', 'TYPED_METHOD_BIND', 'NOMINMAX'])
 elif is_windows and use_mingw:
     env.Append(CCFLAGS=['-fPIC'])
-    env.Append(CXXFLAGS=['-std=c++17'])
+    env.Append(CXXFLAGS=['-std=c++20'])
     env.Append(CPPDEFINES=['WIN32', '_WIN32', 'WINDOWS_ENABLED'])
     env.Append(CCFLAGS=['-Wwrite-strings'])
     env.Append(LINKFLAGS=['-Wl,--no-undefined'])
     env.Append(LINKFLAGS=['-static-libgcc', '-static-libstdc++'])
 else:
     env.Append(CCFLAGS=['-fPIC'])
-    env.Append(CXXFLAGS=['-std=c++17'])
+    env.Append(CXXFLAGS=['-std=c++20'])
     if platform == 'macos':
         if arch == 'universal':
             env.Append(CCFLAGS=['-arch', 'x86_64', '-arch', 'arm64'])
@@ -108,14 +109,25 @@ elif platform == 'macos':
 else: # linux
     env.Append(LIBS=['livekit_ffi', 'livekit'])
 
+# Add frametap static library
+if is_windows and not use_mingw:
+    env.Append(LIBS=[File('frametap/lib/frametap.lib')])
+else:
+    env.Append(LIBS=[File('frametap/lib/libframetap.a')])
+
 # Add platform-specific system libraries
 if is_windows:
-    env.Append(LIBS=['ws2_32', 'wsock32', 'iphlpapi', 'crypt32', 'advapi32', 'userenv', 'bcrypt'])
+    env.Append(LIBS=['ws2_32', 'wsock32', 'iphlpapi', 'crypt32', 'advapi32', 'userenv', 'bcrypt',
+                      'dxgi', 'd3d11', 'dwmapi', 'user32', 'gdi32', 'ole32'])
 elif platform == 'linux':
     env.Append(LIBS=['pthread', 'dl', 'm'])
+    # frametap requires X11 libs and PipeWire/Wayland (discovered via pkg-config)
+    env.Append(LIBS=['X11', 'Xext', 'Xfixes', 'Xinerama'])
+    env.ParseConfig('pkg-config --cflags --libs libpipewire-0.3 libsystemd wayland-client 2>/dev/null || true')
 elif platform == 'macos':
     env.Append(LIBS=['pthread'])
-    env.Append(FRAMEWORKS=['CoreFoundation', 'Foundation', 'Security', 'AudioToolbox', 'CoreAudio'])
+    env.Append(FRAMEWORKS=['CoreFoundation', 'Foundation', 'Security', 'AudioToolbox', 'CoreAudio',
+                           'AppKit', 'ScreenCaptureKit', 'CoreGraphics', 'CoreMedia', 'CoreVideo'])
 
 # E2EE support - opt-in; requires an SDK build that includes E2EE symbols
 enable_e2ee = ARGUMENTS.get('e2ee', 'no').lower() in ['yes', 'true', '1']
@@ -132,6 +144,7 @@ src_files = [
     'src/livekit_audio_stream.cpp',
     'src/livekit_video_source.cpp',
     'src/livekit_audio_source.cpp',
+    'src/livekit_screen_capture.cpp',
 ]
 
 if enable_e2ee:
