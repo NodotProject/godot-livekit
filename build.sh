@@ -124,6 +124,17 @@ fetch_livekit() {
     fi
     
     rm "${LIVEKIT_ARCHIVE}"
+
+    # Patch: local_participant.h uses std::vector<ParticipantTrackPermission> in a default
+    # parameter but only forward-declares the type. Include track.h for the full definition.
+    local lp_header="livekit-sdk/include/livekit/local_participant.h"
+    if [ -f "$lp_header" ] && ! grep -q '#include "livekit/track.h"' "$lp_header"; then
+        echo -e "${YELLOW}Patching local_participant.h (incomplete type fix)...${NC}"
+        sed -i.bak 's|#include "livekit/participant.h"|#include "livekit/participant.h"\
+#include "livekit/track.h"|' "$lp_header"
+        rm -f "${lp_header}.bak"
+    fi
+
     echo -e "${GREEN}LiveKit SDK downloaded and extracted successfully!${NC}"
 }
 
