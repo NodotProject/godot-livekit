@@ -217,6 +217,16 @@ build_main_project() {
         cp livekit-sdk/bin/*.dll addons/godot-livekit/bin/ || true
     elif [ "$PLATFORM" == "macos" ]; then
         cp livekit-sdk/lib/*.dylib addons/godot-livekit/bin/ || true
+
+        # Fix hardcoded absolute paths in dylibs from upstream CI builds
+        echo -e "${YELLOW}Fixing dylib install names...${NC}"
+        for dylib in addons/godot-livekit/bin/*.dylib; do
+            # Find any absolute path references to liblivekit_ffi.dylib and rewrite to @rpath
+            otool -L "$dylib" | grep liblivekit_ffi.dylib | grep -v @rpath | awk '{print $1}' | while read -r bad_path; do
+                echo "  Fixing $dylib: $bad_path -> @rpath/liblivekit_ffi.dylib"
+                install_name_tool -change "$bad_path" "@rpath/liblivekit_ffi.dylib" "$dylib"
+            done
+        done
     fi
 }
 
