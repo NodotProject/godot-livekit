@@ -122,6 +122,61 @@ func _on_rpc_error(method, error_message):
     print("RPC error for ", method, ": ", error_message)
 ```
 
+## Screen Capture
+
+To capture a screen or window and publish it as a video track:
+
+```gdscript
+var screen_capture: LiveKitScreenCapture
+var video_source: LiveKitVideoSource
+var video_track: LiveKitLocalVideoTrack
+
+func start_screen_share():
+    # Check permissions first (important on macOS)
+    var perms = LiveKitScreenCapture.check_permissions()
+    if perms["status"] == LiveKitScreenCapture.PERMISSION_ERROR:
+        print("Screen capture not permitted: ", perms["summary"])
+        return
+
+    # Create capture for the primary monitor
+    screen_capture = LiveKitScreenCapture.create()
+    screen_capture.start()
+
+    # Create a video source and track to publish the captured frames
+    video_source = LiveKitVideoSource.create(1920, 1080)
+    video_track = LiveKitLocalVideoTrack.create("screen", video_source)
+    room.get_local_participant().publish_track(video_track, {})
+
+func _process(_delta):
+    if screen_capture and screen_capture.poll():
+        var image = screen_capture.get_image()
+        if image:
+            video_source.capture_frame(image, Time.get_ticks_usec(), 0)
+```
+
+You can also capture a specific window:
+
+```gdscript
+func share_specific_window():
+    var windows = LiveKitScreenCapture.get_windows()
+    for w in windows:
+        if "Firefox" in w["name"]:
+            screen_capture = LiveKitScreenCapture.create_for_window(w)
+            screen_capture.start()
+            break
+```
+
+Or take a one-shot screenshot without starting continuous capture:
+
+```gdscript
+func take_screenshot():
+    var capture = LiveKitScreenCapture.create()
+    var image = capture.screenshot()
+    if image:
+        image.save_png("res://screenshot.png")
+    capture.close()
+```
+
 ## End-to-End Encryption (E2EE)
 
 > **Note:** E2EE is currently only available on Linux. macOS and Windows builds do not yet include E2EE support in the underlying LiveKit SDK.
@@ -162,6 +217,22 @@ func _on_track_subscribed(track, publication, participant):
 func _on_stats_received(stats):
     for stat in stats:
         print(stat)
+```
+
+## Connection Options
+
+The `connect_to_room()` method accepts an options dictionary with the following keys:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `auto_subscribe` | `bool` | `true` | Automatically subscribe to tracks published by remote participants. |
+| `dynacast` | `bool` | `false` | Enable dynacast for adaptive simulcast. |
+| `auto_reconnect` | `bool` | `true` | Allow the SDK to automatically reconnect on network disruption. When `false`, a `disconnected` signal is emitted instead, letting your application handle reconnection. |
+| `e2ee` | `LiveKitE2eeOptions` | — | End-to-end encryption options (Linux only). |
+
+```gdscript
+# Example: disable auto-reconnect so you can handle reconnection yourself
+room.connect_to_room(url, token, {"auto_reconnect": false, "dynacast": true})
 ```
 
 ## Next Steps

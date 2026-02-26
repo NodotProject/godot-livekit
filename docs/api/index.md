@@ -18,7 +18,7 @@ Represents a LiveKit room. Handles connecting, disconnecting, and room-level sig
 *   `connection_state: int` (read-only): The current connection state (see `ConnectionState` enum).
 
 **Methods:**
-*   `connect_to_room(url: String, token: String, options: Dictionary) -> bool`: Connects to a LiveKit server using the provided WebSocket URL and access token.
+*   `connect_to_room(url: String, token: String, options: Dictionary) -> bool`: Connects to a LiveKit server using the provided WebSocket URL and access token. Options: `auto_subscribe` (default `true`), `dynacast` (default `false`), `auto_reconnect` (default `true`), `e2ee` (a `LiveKitE2eeOptions`, Linux only).
 *   `disconnect_from_room()`: Disconnects from the current room.
 *   `get_local_participant() -> LiveKitLocalParticipant`: Returns the local participant object.
 *   `get_remote_participants() -> Dictionary`: Returns a dictionary of remote participants, keyed by their SID.
@@ -237,6 +237,45 @@ Receives audio frames from a remote audio track and pipes them into Godot's audi
 *   `get_num_channels() -> int`: Returns the number of audio channels.
 *   `poll(playback: AudioStreamGeneratorPlayback) -> int`: Polls for new audio data and pushes it to the playback buffer. Call this in `_process()`.
 *   `close()`: Closes the audio stream and stops receiving audio.
+
+---
+
+## Screen Capture
+
+### `LiveKitScreenCapture`
+Captures screen content from monitors or individual windows using the native [frametap](https://github.com/nickarella/frametap) library. Frames are delivered as `ImageTexture` / `Image` objects that can be fed into a `LiveKitVideoSource` for publishing.
+
+**Static Query Methods:**
+*   `get_monitors() -> Array`: Returns an array of dictionaries describing available monitors. Each dictionary contains: `id`, `name`, `x`, `y`, `width`, `height`, `scale`.
+*   `get_windows() -> Array`: Returns an array of dictionaries describing available windows. Each dictionary contains: `id`, `name`, `x`, `y`, `width`, `height`.
+*   `check_permissions() -> Dictionary`: Checks screen capture permissions. Returns a dictionary with `status` (int, see `PermissionLevel` enum), `summary` (String), and `details` (Array of Strings).
+
+**Factory Methods:**
+*   `create() -> LiveKitScreenCapture`: Creates a screen capture for the default/primary monitor.
+*   `create_for_monitor(monitor: Dictionary) -> LiveKitScreenCapture`: Creates a screen capture for a specific monitor (use a dictionary from `get_monitors()`).
+*   `create_for_window(window: Dictionary) -> LiveKitScreenCapture`: Creates a screen capture for a specific window (use a dictionary from `get_windows()`).
+
+**Capture Lifecycle:**
+*   `start()`: Starts asynchronous screen capture. Frames arrive via `poll()`.
+*   `stop()`: Stops capturing.
+*   `pause()`: Pauses capture without stopping.
+*   `resume()`: Resumes a paused capture.
+*   `is_paused() -> bool`: Returns whether capture is currently paused.
+
+**Frame Access:**
+*   `poll() -> bool`: Polls for a new frame and updates the texture. Call this in `_process()`. Returns `true` if a new frame was received.
+*   `get_texture() -> ImageTexture`: Returns the texture containing the latest captured frame.
+*   `get_image() -> Image`: Returns the latest captured frame as an Image.
+*   `screenshot() -> Image`: Takes a single screenshot and returns it immediately (does not require `start()`).
+
+**Cleanup:**
+*   `close()`: Stops capture and releases all resources.
+
+**Signals:**
+*   `frame_received`: Emitted when a new frame is available after `poll()`.
+
+**Enums:**
+*   `PermissionLevel`: `PERMISSION_OK = 0`, `PERMISSION_WARNING = 1`, `PERMISSION_ERROR = 2`
 
 ---
 

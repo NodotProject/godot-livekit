@@ -8,6 +8,7 @@
 
 - **Real-Time Communication**: Connect to LiveKit servers for audio, video, and data streaming.
 - **Full Track Support**: Publish and subscribe to audio/video tracks, with local sources for capturing from Godot.
+- **Screen Capture**: Capture monitors or individual windows natively using the built-in `LiveKitScreenCapture` class (macOS, Windows, Linux).
 - **Data Channels**: Send and receive arbitrary data messages with reliable or unreliable delivery.
 - **RPC Support**: Perform remote procedure calls between participants.
 - **End-to-End Encryption (E2EE)**: Secure your media streams with configurable encryption, key management, and per-participant frame cryptors.
@@ -86,6 +87,20 @@ func _on_track_subscribed(track, publication, participant):
 
 func _on_data_received(data, participant, kind, topic):
     print("Data from ", participant.get_identity(), ": ", data.get_string_from_utf8())
+```
+
+### Screen Capture
+
+You can capture screens and windows natively:
+
+```gdscript
+var capture = LiveKitScreenCapture.create()
+capture.start()
+
+func _process(_delta):
+    if capture.poll():
+        var image = capture.get_image()
+        # Feed into a LiveKitVideoSource for screen sharing
 ```
 
 ## Running Tests

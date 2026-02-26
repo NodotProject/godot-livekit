@@ -8,6 +8,7 @@ This GDExtension provides real-time audio, video, and data functionality in Godo
 
 - Connect to LiveKit rooms and manage participants
 - Subscribe to and publish audio/video tracks
+- Capture screens and windows natively with `LiveKitScreenCapture`
 - Send and receive data messages
 - Perform remote procedure calls (RPC) between participants
 - Secure media with end-to-end encryption (E2EE) and key management (Linux only)
