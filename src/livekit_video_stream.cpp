@@ -45,7 +45,7 @@ void LiveKitVideoStream::_reader_loop() {
 
 Ref<LiveKitVideoStream> LiveKitVideoStream::from_track(const Ref<LiveKitTrack> &track) {
     if (track.is_null() || !track->get_native_track()) {
-        UtilityFunctions::printerr("LiveKitVideoStream::from_track: invalid track");
+        UtilityFunctions::push_error("LiveKitVideoStream::from_track: invalid track");
         return Ref<LiveKitVideoStream>();
     }
 
@@ -54,7 +54,7 @@ Ref<LiveKitVideoStream> LiveKitVideoStream::from_track(const Ref<LiveKitTrack> &
 
     auto native_stream = livekit::VideoStream::fromTrack(track->get_native_track(), opts);
     if (!native_stream) {
-        UtilityFunctions::printerr("LiveKitVideoStream::from_track: failed to create stream");
+        UtilityFunctions::push_error("LiveKitVideoStream::from_track: failed to create stream");
         return Ref<LiveKitVideoStream>();
     }
 
@@ -70,7 +70,7 @@ Ref<LiveKitVideoStream> LiveKitVideoStream::from_track(const Ref<LiveKitTrack> &
 
 Ref<LiveKitVideoStream> LiveKitVideoStream::from_participant(const Ref<LiveKitRemoteParticipant> &participant, int source) {
     if (participant.is_null() || !participant->get_native_remote_participant()) {
-        UtilityFunctions::printerr("LiveKitVideoStream::from_participant: invalid participant");
+        UtilityFunctions::push_error("LiveKitVideoStream::from_participant: invalid participant");
         return Ref<LiveKitVideoStream>();
     }
 
@@ -82,7 +82,7 @@ Ref<LiveKitVideoStream> LiveKitVideoStream::from_participant(const Ref<LiveKitRe
             (livekit::TrackSource)source,
             opts);
     if (!native_stream) {
-        UtilityFunctions::printerr("LiveKitVideoStream::from_participant: failed to create stream");
+        UtilityFunctions::push_error("LiveKitVideoStream::from_participant: failed to create stream");
         return Ref<LiveKitVideoStream>();
     }
 

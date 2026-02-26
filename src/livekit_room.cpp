@@ -7,6 +7,7 @@
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <exception>
 #include <livekit/participant.h>
 #include <livekit/local_participant.h>
 #include <livekit/remote_participant.h>
@@ -129,13 +130,13 @@ LiveKitRoom::LiveKitRoom() {
 }
 
 LiveKitRoom::~LiveKitRoom() {
-    // The disconnect thread only captures old_room/old_delegate by value;
-    // it never dereferences `this`.  Safe to detach so the main thread is
-    // not blocked waiting for the SDK Room destructor to tear down networking.
+    // The disconnect thread joins the connect thread, which dereferences
+    // `this` (event_mutex_, pending_events_).  We must join both before
+    // destroying the object.  Join disconnect first (it transitively waits
+    // on connect), then connect (in case disconnect was never started).
     if (disconnect_thread_.joinable()) {
-        disconnect_thread_.detach();
+        disconnect_thread_.join();
     }
-    // Must join: the connect thread dereferences `this->room`.
     if (connect_thread_.joinable()) {
         connect_thread_.join();
     }
@@ -187,7 +188,14 @@ bool LiveKitRoom::connect_to_room(const String &url, const String &token, const 
     // Run the blocking Connect() on a background thread so the main
     // thread (and Godot's rendering/input loop) stays responsive.
     connect_thread_ = std::thread([this, url_str, token_str, room_options]() {
-        bool success = room->Connect(url_str.c_str(), token_str.c_str(), room_options);
+        bool success = false;
+        try {
+            success = room->Connect(url_str.c_str(), token_str.c_str(), room_options);
+        } catch (const std::exception &e) {
+            UtilityFunctions::push_error("LiveKitRoom::connect_to_room: connection failed: ", String(e.what()));
+        } catch (...) {
+            UtilityFunctions::push_error("LiveKitRoom::connect_to_room: connection failed with unknown error");
+        }
         std::lock_guard<std::mutex> lock(event_mutex_);
         pending_events_.push_back([this, success]() {
             _finalize_connection(success);

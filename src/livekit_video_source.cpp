@@ -33,6 +33,7 @@ Ref<LiveKitVideoSource> LiveKitVideoSource::create(int width, int height) {
 
 void LiveKitVideoSource::capture_frame(const Ref<Image> &image, int64_t timestamp_us, int rotation) {
     if (!source_ || image.is_null()) {
+        UtilityFunctions::push_error("LiveKitVideoSource::capture_frame: source not initialized or image is null");
         return;
     }
 

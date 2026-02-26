@@ -62,7 +62,7 @@ void LiveKitAudioStream::_reader_loop() {
 
 Ref<LiveKitAudioStream> LiveKitAudioStream::from_track(const Ref<LiveKitTrack> &track) {
     if (track.is_null() || !track->get_native_track()) {
-        UtilityFunctions::printerr("LiveKitAudioStream::from_track: invalid track");
+        UtilityFunctions::push_error("LiveKitAudioStream::from_track: invalid track");
         return Ref<LiveKitAudioStream>();
     }
 
@@ -70,7 +70,7 @@ Ref<LiveKitAudioStream> LiveKitAudioStream::from_track(const Ref<LiveKitTrack> &
 
     auto native_stream = livekit::AudioStream::fromTrack(track->get_native_track(), opts);
     if (!native_stream) {
-        UtilityFunctions::printerr("LiveKitAudioStream::from_track: failed to create stream");
+        UtilityFunctions::push_error("LiveKitAudioStream::from_track: failed to create stream");
         return Ref<LiveKitAudioStream>();
     }
 
@@ -85,7 +85,7 @@ Ref<LiveKitAudioStream> LiveKitAudioStream::from_track(const Ref<LiveKitTrack> &
 
 Ref<LiveKitAudioStream> LiveKitAudioStream::from_participant(const Ref<LiveKitRemoteParticipant> &participant, int source) {
     if (participant.is_null() || !participant->get_native_remote_participant()) {
-        UtilityFunctions::printerr("LiveKitAudioStream::from_participant: invalid participant");
+        UtilityFunctions::push_error("LiveKitAudioStream::from_participant: invalid participant");
         return Ref<LiveKitAudioStream>();
     }
 
@@ -96,7 +96,7 @@ Ref<LiveKitAudioStream> LiveKitAudioStream::from_participant(const Ref<LiveKitRe
             (livekit::TrackSource)source,
             opts);
     if (!native_stream) {
-        UtilityFunctions::printerr("LiveKitAudioStream::from_participant: failed to create stream");
+        UtilityFunctions::push_error("LiveKitAudioStream::from_participant: failed to create stream");
         return Ref<LiveKitAudioStream>();
     }
 

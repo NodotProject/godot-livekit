@@ -67,7 +67,7 @@ Array LiveKitScreenCapture::get_monitors() {
             result.push_back(d);
         }
     } catch (const frametap::CaptureError &e) {
-        UtilityFunctions::printerr("LiveKitScreenCapture::get_monitors: ", e.what());
+        UtilityFunctions::push_error("LiveKitScreenCapture::get_monitors: ", e.what());
     }
     return result;
 }
@@ -87,7 +87,7 @@ Array LiveKitScreenCapture::get_windows() {
             result.push_back(d);
         }
     } catch (const frametap::CaptureError &e) {
-        UtilityFunctions::printerr("LiveKitScreenCapture::get_windows: ", e.what());
+        UtilityFunctions::push_error("LiveKitScreenCapture::get_windows: ", e.what());
     }
     return result;
 }
@@ -127,14 +127,14 @@ Ref<LiveKitScreenCapture> LiveKitScreenCapture::create() {
         capture->texture_.instantiate();
         return capture;
     } catch (const frametap::CaptureError &e) {
-        UtilityFunctions::printerr("LiveKitScreenCapture::create: ", e.what());
+        UtilityFunctions::push_error("LiveKitScreenCapture::create: ", e.what());
         return Ref<LiveKitScreenCapture>();
     }
 }
 
 Ref<LiveKitScreenCapture> LiveKitScreenCapture::create_for_monitor(const Dictionary &monitor_dict) {
     if (!monitor_dict.has("id")) {
-        UtilityFunctions::printerr("LiveKitScreenCapture::create_for_monitor: dictionary missing 'id' key");
+        UtilityFunctions::push_error("LiveKitScreenCapture::create_for_monitor: dictionary missing 'id' key");
         return Ref<LiveKitScreenCapture>();
     }
 
@@ -156,14 +156,14 @@ Ref<LiveKitScreenCapture> LiveKitScreenCapture::create_for_monitor(const Diction
         capture->texture_.instantiate();
         return capture;
     } catch (const frametap::CaptureError &e) {
-        UtilityFunctions::printerr("LiveKitScreenCapture::create_for_monitor: ", e.what());
+        UtilityFunctions::push_error("LiveKitScreenCapture::create_for_monitor: ", e.what());
         return Ref<LiveKitScreenCapture>();
     }
 }
 
 Ref<LiveKitScreenCapture> LiveKitScreenCapture::create_for_window(const Dictionary &window_dict) {
     if (!window_dict.has("id")) {
-        UtilityFunctions::printerr("LiveKitScreenCapture::create_for_window: dictionary missing 'id' key");
+        UtilityFunctions::push_error("LiveKitScreenCapture::create_for_window: dictionary missing 'id' key");
         return Ref<LiveKitScreenCapture>();
     }
 
@@ -184,7 +184,7 @@ Ref<LiveKitScreenCapture> LiveKitScreenCapture::create_for_window(const Dictiona
         capture->texture_.instantiate();
         return capture;
     } catch (const frametap::CaptureError &e) {
-        UtilityFunctions::printerr("LiveKitScreenCapture::create_for_window: ", e.what());
+        UtilityFunctions::push_error("LiveKitScreenCapture::create_for_window: ", e.what());
         return Ref<LiveKitScreenCapture>();
     }
 }
@@ -193,7 +193,7 @@ Ref<LiveKitScreenCapture> LiveKitScreenCapture::create_for_window(const Dictiona
 
 void LiveKitScreenCapture::start() {
     if (!tap_) {
-        UtilityFunctions::printerr("LiveKitScreenCapture::start: not initialized (use create() factory)");
+        UtilityFunctions::push_error("LiveKitScreenCapture::start: not initialized (use create() factory)");
         return;
     }
     if (capturing_.load()) {
@@ -212,7 +212,7 @@ void LiveKitScreenCapture::start() {
         tap_->start_async();
         capturing_.store(true);
     } catch (const frametap::CaptureError &e) {
-        UtilityFunctions::printerr("LiveKitScreenCapture::start: ", e.what());
+        UtilityFunctions::push_error("LiveKitScreenCapture::start: ", e.what());
     }
 }
 
@@ -225,7 +225,7 @@ void LiveKitScreenCapture::stop() {
         tap_->stop();
         capturing_.store(false);
     } catch (const frametap::CaptureError &e) {
-        UtilityFunctions::printerr("LiveKitScreenCapture::stop: ", e.what());
+        UtilityFunctions::push_error("LiveKitScreenCapture::stop: ", e.what());
     }
 }
 
@@ -236,7 +236,7 @@ void LiveKitScreenCapture::pause() {
     try {
         tap_->pause();
     } catch (const frametap::CaptureError &e) {
-        UtilityFunctions::printerr("LiveKitScreenCapture::pause: ", e.what());
+        UtilityFunctions::push_error("LiveKitScreenCapture::pause: ", e.what());
     }
 }
 
@@ -247,7 +247,7 @@ void LiveKitScreenCapture::resume() {
     try {
         tap_->resume();
     } catch (const frametap::CaptureError &e) {
-        UtilityFunctions::printerr("LiveKitScreenCapture::resume: ", e.what());
+        UtilityFunctions::push_error("LiveKitScreenCapture::resume: ", e.what());
     }
 }
 
@@ -258,7 +258,7 @@ bool LiveKitScreenCapture::is_paused() const {
     try {
         return tap_->is_paused();
     } catch (const frametap::CaptureError &e) {
-        UtilityFunctions::printerr("LiveKitScreenCapture::is_paused: ", e.what());
+        UtilityFunctions::push_error("LiveKitScreenCapture::is_paused: ", e.what());
         return false;
     }
 }
@@ -320,7 +320,7 @@ Ref<Image> LiveKitScreenCapture::get_image() const {
 
 Ref<Image> LiveKitScreenCapture::screenshot() {
     if (!tap_) {
-        UtilityFunctions::printerr("LiveKitScreenCapture::screenshot: not initialized (use create() factory)");
+        UtilityFunctions::push_error("LiveKitScreenCapture::screenshot: not initialized (use create() factory)");
         return Ref<Image>();
     }
 
@@ -337,7 +337,7 @@ Ref<Image> LiveKitScreenCapture::screenshot() {
         return Image::create_from_data(
             (int)img_data.width, (int)img_data.height, false, Image::FORMAT_RGBA8, pba);
     } catch (const frametap::CaptureError &e) {
-        UtilityFunctions::printerr("LiveKitScreenCapture::screenshot: ", e.what());
+        UtilityFunctions::push_error("LiveKitScreenCapture::screenshot: ", e.what());
         return Ref<Image>();
     }
 }

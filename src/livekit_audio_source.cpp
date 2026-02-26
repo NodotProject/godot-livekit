@@ -35,6 +35,7 @@ Ref<LiveKitAudioSource> LiveKitAudioSource::create(int sample_rate, int num_chan
 
 void LiveKitAudioSource::capture_frame(const PackedFloat32Array &data, int sample_rate, int num_channels, int samples_per_channel) {
     if (!source_) {
+        UtilityFunctions::push_error("LiveKitAudioSource::capture_frame: source not initialized");
         return;
     }
 

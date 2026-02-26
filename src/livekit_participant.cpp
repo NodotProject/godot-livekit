@@ -143,7 +143,7 @@ void LiveKitLocalParticipant::bind_local_participant(livekit::LocalParticipant *
 
 void LiveKitLocalParticipant::publish_data(const PackedByteArray &data, bool reliable, const PackedStringArray &destination_identities, const String &topic) {
     if (!local_participant_) {
-        UtilityFunctions::printerr("LiveKitLocalParticipant::publish_data: not bound");
+        UtilityFunctions::push_error("LiveKitLocalParticipant::publish_data: not bound");
         return;
     }
 
@@ -159,6 +159,7 @@ void LiveKitLocalParticipant::publish_data(const PackedByteArray &data, bool rel
 
 void LiveKitLocalParticipant::set_metadata(const String &metadata) {
     if (!local_participant_) {
+        UtilityFunctions::push_error("LiveKitLocalParticipant::set_metadata: not bound");
         return;
     }
     local_participant_->setMetadata(std::string(metadata.utf8().get_data()));
@@ -166,6 +167,7 @@ void LiveKitLocalParticipant::set_metadata(const String &metadata) {
 
 void LiveKitLocalParticipant::set_name(const String &name) {
     if (!local_participant_) {
+        UtilityFunctions::push_error("LiveKitLocalParticipant::set_name: not bound");
         return;
     }
     local_participant_->setName(std::string(name.utf8().get_data()));
@@ -173,6 +175,7 @@ void LiveKitLocalParticipant::set_name(const String &name) {
 
 void LiveKitLocalParticipant::set_attributes(const Dictionary &attributes) {
     if (!local_participant_) {
+        UtilityFunctions::push_error("LiveKitLocalParticipant::set_attributes: not bound");
         return;
     }
 
@@ -204,13 +207,13 @@ Dictionary LiveKitLocalParticipant::get_track_publications() const {
 
 Ref<LiveKitLocalTrackPublication> LiveKitLocalParticipant::publish_track(const Ref<LiveKitTrack> &track, const Dictionary &options) {
     if (!local_participant_ || track.is_null()) {
-        UtilityFunctions::printerr("LiveKitLocalParticipant::publish_track: invalid arguments");
+        UtilityFunctions::push_error("LiveKitLocalParticipant::publish_track: invalid arguments");
         return Ref<LiveKitLocalTrackPublication>();
     }
 
     auto native_track = track->get_native_track();
     if (!native_track) {
-        UtilityFunctions::printerr("LiveKitLocalParticipant::publish_track: track has no native handle");
+        UtilityFunctions::push_error("LiveKitLocalParticipant::publish_track: track has no native handle");
         return Ref<LiveKitLocalTrackPublication>();
     }
 
@@ -232,7 +235,7 @@ Ref<LiveKitLocalTrackPublication> LiveKitLocalParticipant::publish_track(const R
 
     auto native_pub = local_participant_->publishTrack(native_track, pub_options);
     if (!native_pub) {
-        UtilityFunctions::printerr("LiveKitLocalParticipant::publish_track: publish failed");
+        UtilityFunctions::push_error("LiveKitLocalParticipant::publish_track: publish failed");
         return Ref<LiveKitLocalTrackPublication>();
     }
 
@@ -244,6 +247,7 @@ Ref<LiveKitLocalTrackPublication> LiveKitLocalParticipant::publish_track(const R
 
 void LiveKitLocalParticipant::unpublish_track(const String &track_sid) {
     if (!local_participant_) {
+        UtilityFunctions::push_error("LiveKitLocalParticipant::unpublish_track: not bound");
         return;
     }
     local_participant_->unpublishTrack(std::string(track_sid.utf8().get_data()));
@@ -253,7 +257,7 @@ void LiveKitLocalParticipant::unpublish_track(const String &track_sid) {
 
 void LiveKitLocalParticipant::perform_rpc(const String &destination, const String &method, const String &payload, double timeout) {
     if (!local_participant_) {
-        UtilityFunctions::printerr("LiveKitLocalParticipant::perform_rpc: not bound");
+        UtilityFunctions::push_error("LiveKitLocalParticipant::perform_rpc: not bound");
         return;
     }
 
@@ -284,6 +288,7 @@ void LiveKitLocalParticipant::perform_rpc(const String &destination, const Strin
 
 void LiveKitLocalParticipant::register_rpc_method(const String &method) {
     if (!local_participant_) {
+        UtilityFunctions::push_error("LiveKitLocalParticipant::register_rpc_method: not bound");
         return;
     }
 
@@ -304,6 +309,7 @@ void LiveKitLocalParticipant::register_rpc_method(const String &method) {
 
 void LiveKitLocalParticipant::unregister_rpc_method(const String &method) {
     if (!local_participant_) {
+        UtilityFunctions::push_error("LiveKitLocalParticipant::unregister_rpc_method: not bound");
         return;
     }
     std::string method_name = method.utf8().get_data();
@@ -317,11 +323,11 @@ void LiveKitLocalParticipant::respond_to_rpc(const String &request_id, const Str
     // RPC responses are handled through the handler return value
     // Since we're using async (nullopt return), this is a no-op placeholder
     // The SDK's RPC model requires synchronous response from the handler
-    UtilityFunctions::printerr("LiveKitLocalParticipant::respond_to_rpc: async RPC responses not yet supported by SDK");
+    UtilityFunctions::push_error("LiveKitLocalParticipant::respond_to_rpc: async RPC responses not yet supported by SDK");
 }
 
 void LiveKitLocalParticipant::respond_to_rpc_error(const String &request_id, int code, const String &message) {
-    UtilityFunctions::printerr("LiveKitLocalParticipant::respond_to_rpc_error: async RPC responses not yet supported by SDK");
+    UtilityFunctions::push_error("LiveKitLocalParticipant::respond_to_rpc_error: async RPC responses not yet supported by SDK");
 }
 
 // LiveKitRemoteParticipant

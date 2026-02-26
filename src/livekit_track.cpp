@@ -340,6 +340,7 @@ int LiveKitTrack::get_stream_state() const {
 
 void LiveKitTrack::request_stats() {
     if (!track_) {
+        UtilityFunctions::push_error("LiveKitTrack::request_stats: track not bound");
         return;
     }
 
@@ -362,10 +363,10 @@ void LiveKitTrack::request_stats() {
                 }
                 prevent_free->call_deferred("emit_signal", "stats_received", result);
             } else {
-                UtilityFunctions::printerr("LiveKitTrack::request_stats: timed out waiting for stats");
+                UtilityFunctions::push_error("LiveKitTrack::request_stats: timed out waiting for stats");
             }
         } catch (const std::exception &e) {
-            UtilityFunctions::printerr("LiveKitTrack::request_stats: error: ", String(e.what()));
+            UtilityFunctions::push_error("LiveKitTrack::request_stats: error: ", String(e.what()));
         }
     }).detach();
 }
@@ -386,13 +387,13 @@ LiveKitLocalAudioTrack::~LiveKitLocalAudioTrack() {
 
 Ref<LiveKitLocalAudioTrack> LiveKitLocalAudioTrack::create(const String &name, const Ref<LiveKitAudioSource> &source) {
     if (source.is_null()) {
-        UtilityFunctions::printerr("LiveKitLocalAudioTrack::create: source is null");
+        UtilityFunctions::push_error("LiveKitLocalAudioTrack::create: source is null");
         return Ref<LiveKitLocalAudioTrack>();
     }
 
     auto native_source = source->get_native_source();
     if (!native_source) {
-        UtilityFunctions::printerr("LiveKitLocalAudioTrack::create: native source is null");
+        UtilityFunctions::push_error("LiveKitLocalAudioTrack::create: native source is null");
         return Ref<LiveKitLocalAudioTrack>();
     }
 
@@ -400,7 +401,7 @@ Ref<LiveKitLocalAudioTrack> LiveKitLocalAudioTrack::create(const String &name, c
             std::string(name.utf8().get_data()), native_source);
 
     if (!native_track) {
-        UtilityFunctions::printerr("LiveKitLocalAudioTrack::create: failed to create native track");
+        UtilityFunctions::push_error("LiveKitLocalAudioTrack::create: failed to create native track");
         return Ref<LiveKitLocalAudioTrack>();
     }
 
@@ -444,13 +445,13 @@ LiveKitLocalVideoTrack::~LiveKitLocalVideoTrack() {
 
 Ref<LiveKitLocalVideoTrack> LiveKitLocalVideoTrack::create(const String &name, const Ref<LiveKitVideoSource> &source) {
     if (source.is_null()) {
-        UtilityFunctions::printerr("LiveKitLocalVideoTrack::create: source is null");
+        UtilityFunctions::push_error("LiveKitLocalVideoTrack::create: source is null");
         return Ref<LiveKitLocalVideoTrack>();
     }
 
     auto native_source = source->get_native_source();
     if (!native_source) {
-        UtilityFunctions::printerr("LiveKitLocalVideoTrack::create: native source is null");
+        UtilityFunctions::push_error("LiveKitLocalVideoTrack::create: native source is null");
         return Ref<LiveKitLocalVideoTrack>();
     }
 
@@ -458,7 +459,7 @@ Ref<LiveKitLocalVideoTrack> LiveKitLocalVideoTrack::create(const String &name, c
             std::string(name.utf8().get_data()), native_source);
 
     if (!native_track) {
-        UtilityFunctions::printerr("LiveKitLocalVideoTrack::create: failed to create native track");
+        UtilityFunctions::push_error("LiveKitLocalVideoTrack::create: failed to create native track");
         return Ref<LiveKitLocalVideoTrack>();
     }
 

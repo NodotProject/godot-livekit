@@ -124,7 +124,7 @@ void LiveKitKeyProvider::bind_key_provider(livekit::E2EEManager::KeyProvider *kp
 
 void LiveKitKeyProvider::set_shared_key(const PackedByteArray &key, int key_index) {
     if (!key_provider_) {
-        UtilityFunctions::printerr("LiveKitKeyProvider::set_shared_key: not bound");
+        UtilityFunctions::push_error("LiveKitKeyProvider::set_shared_key: not bound");
         return;
     }
     std::vector<uint8_t> k(key.ptr(), key.ptr() + key.size());
@@ -134,7 +134,7 @@ void LiveKitKeyProvider::set_shared_key(const PackedByteArray &key, int key_inde
 PackedByteArray LiveKitKeyProvider::get_shared_key(int key_index) const {
     PackedByteArray result;
     if (!key_provider_) {
-        UtilityFunctions::printerr("LiveKitKeyProvider::get_shared_key: not bound");
+        UtilityFunctions::push_error("LiveKitKeyProvider::get_shared_key: not bound");
         return result;
     }
     auto k = key_provider_->exportSharedKey(key_index);
@@ -146,7 +146,7 @@ PackedByteArray LiveKitKeyProvider::get_shared_key(int key_index) const {
 PackedByteArray LiveKitKeyProvider::ratchet_shared_key(int key_index) {
     PackedByteArray result;
     if (!key_provider_) {
-        UtilityFunctions::printerr("LiveKitKeyProvider::ratchet_shared_key: not bound");
+        UtilityFunctions::push_error("LiveKitKeyProvider::ratchet_shared_key: not bound");
         return result;
     }
     auto k = key_provider_->ratchetSharedKey(key_index);
@@ -157,7 +157,7 @@ PackedByteArray LiveKitKeyProvider::ratchet_shared_key(int key_index) {
 
 void LiveKitKeyProvider::set_key(const String &participant_identity, const PackedByteArray &key, int key_index) {
     if (!key_provider_) {
-        UtilityFunctions::printerr("LiveKitKeyProvider::set_key: not bound");
+        UtilityFunctions::push_error("LiveKitKeyProvider::set_key: not bound");
         return;
     }
     std::string identity = participant_identity.utf8().get_data();
@@ -168,7 +168,7 @@ void LiveKitKeyProvider::set_key(const String &participant_identity, const Packe
 PackedByteArray LiveKitKeyProvider::get_key(const String &participant_identity, int key_index) const {
     PackedByteArray result;
     if (!key_provider_) {
-        UtilityFunctions::printerr("LiveKitKeyProvider::get_key: not bound");
+        UtilityFunctions::push_error("LiveKitKeyProvider::get_key: not bound");
         return result;
     }
     std::string identity = participant_identity.utf8().get_data();
@@ -181,7 +181,7 @@ PackedByteArray LiveKitKeyProvider::get_key(const String &participant_identity, 
 PackedByteArray LiveKitKeyProvider::ratchet_key(const String &participant_identity, int key_index) {
     PackedByteArray result;
     if (!key_provider_) {
-        UtilityFunctions::printerr("LiveKitKeyProvider::ratchet_key: not bound");
+        UtilityFunctions::push_error("LiveKitKeyProvider::ratchet_key: not bound");
         return result;
     }
     std::string identity = participant_identity.utf8().get_data();
@@ -247,7 +247,7 @@ bool LiveKitFrameCryptor::get_enabled() const {
 
 void LiveKitFrameCryptor::set_enabled(bool enabled) {
     if (!frame_cryptor_) {
-        UtilityFunctions::printerr("LiveKitFrameCryptor::set_enabled: not bound");
+        UtilityFunctions::push_error("LiveKitFrameCryptor::set_enabled: not bound");
         return;
     }
     frame_cryptor_->setEnabled(enabled);
@@ -256,7 +256,7 @@ void LiveKitFrameCryptor::set_enabled(bool enabled) {
 
 void LiveKitFrameCryptor::set_key_index(int key_index) {
     if (!frame_cryptor_) {
-        UtilityFunctions::printerr("LiveKitFrameCryptor::set_key_index: not bound");
+        UtilityFunctions::push_error("LiveKitFrameCryptor::set_key_index: not bound");
         return;
     }
     frame_cryptor_->setKeyIndex(key_index);
@@ -295,7 +295,7 @@ bool LiveKitE2eeManager::get_enabled() const {
 
 void LiveKitE2eeManager::set_enabled(bool enabled) {
     if (!e2ee_manager_) {
-        UtilityFunctions::printerr("LiveKitE2eeManager::set_enabled: not bound");
+        UtilityFunctions::push_error("LiveKitE2eeManager::set_enabled: not bound");
         return;
     }
     e2ee_manager_->setEnabled(enabled);
