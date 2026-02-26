@@ -243,7 +243,7 @@ Receives audio frames from a remote audio track and pipes them into Godot's audi
 ## Screen Capture
 
 ### `LiveKitScreenCapture`
-Captures screen content from monitors or individual windows using the native [frametap](https://github.com/nickarella/frametap) library. Frames are delivered as `ImageTexture` / `Image` objects that can be fed into a `LiveKitVideoSource` for publishing.
+Captures screen content from monitors or individual windows using the native [frametap](https://github.com/krazyjakee/frametap) library. Frames are delivered as `ImageTexture` / `Image` objects that can be fed into a `LiveKitVideoSource` for publishing.
 
 **Static Query Methods:**
 *   `get_monitors() -> Array`: Returns an array of dictionaries describing available monitors. Each dictionary contains: `id`, `name`, `x`, `y`, `width`, `height`, `scale`.
