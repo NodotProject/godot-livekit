@@ -34,7 +34,7 @@ setup_linux() {
     ARCH="x86_64"
     SCONS_FLAGS="platform=linux arch=x86_64"
     LIVEKIT_ARCHIVE="livekit-sdk-linux-x64-${LIVEKIT_VERSION}.tar.gz"
-    LIVEKIT_URL="https://github.com/livekit/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
+    LIVEKIT_URL="https://github.com/krazyjakee/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
     echo -e "${BLUE}=== Godot-LiveKit Local Build Script (Linux) ===${NC}"
 }
 
@@ -52,7 +52,7 @@ setup_windows() {
     ARCH="x86_64"
     SCONS_FLAGS="platform=windows arch=x86_64"
     LIVEKIT_ARCHIVE="livekit-sdk-windows-x64-${LIVEKIT_VERSION}.zip"
-    LIVEKIT_URL="https://github.com/livekit/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
+    LIVEKIT_URL="https://github.com/krazyjakee/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
     echo -e "${BLUE}=== Godot-LiveKit Local Build Script (Windows Native) ===${NC}"
 }
 
