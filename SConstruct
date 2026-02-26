@@ -129,8 +129,8 @@ elif platform == 'macos':
     env.Append(FRAMEWORKS=['CoreFoundation', 'Foundation', 'Security', 'AudioToolbox', 'CoreAudio',
                            'AppKit', 'ScreenCaptureKit', 'CoreGraphics', 'CoreMedia', 'CoreVideo'])
 
-# E2EE support - opt-in; requires an SDK build that includes E2EE symbols
-enable_e2ee = ARGUMENTS.get('e2ee', 'no').lower() in ['yes', 'true', '1']
+# E2EE support - enabled by default; disable with e2ee=no if your SDK lacks E2EE symbols
+enable_e2ee = ARGUMENTS.get('e2ee', 'yes').lower() not in ['no', 'false', '0']
 if enable_e2ee:
     env.Append(CPPDEFINES=['LIVEKIT_E2EE_SUPPORTED'])
 

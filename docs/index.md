@@ -11,7 +11,7 @@ This GDExtension provides real-time audio, video, and data functionality in Godo
 - Capture screens and windows natively with `LiveKitScreenCapture`
 - Send and receive data messages
 - Perform remote procedure calls (RPC) between participants
-- Secure media with end-to-end encryption (E2EE) and key management (Linux only)
+- Secure media with end-to-end encryption (E2EE) and key management
 - Access detailed WebRTC connection statistics per track
 - Capture audio from Godot's audio system and video from Godot Images
 

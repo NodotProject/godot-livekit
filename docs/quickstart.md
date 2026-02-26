@@ -179,8 +179,6 @@ func take_screenshot():
 
 ## End-to-End Encryption (E2EE)
 
-> **Note:** E2EE is currently only available on Linux. macOS and Windows builds do not yet include E2EE support in the underlying LiveKit SDK.
-
 To enable E2EE when connecting to a room:
 
 ```gdscript
@@ -228,7 +226,7 @@ The `connect_to_room()` method accepts an options dictionary with the following 
 | `auto_subscribe` | `bool` | `true` | Automatically subscribe to tracks published by remote participants. |
 | `dynacast` | `bool` | `false` | Enable dynacast for adaptive simulcast. |
 | `auto_reconnect` | `bool` | `true` | Allow the SDK to automatically reconnect on network disruption. When `false`, a `disconnected` signal is emitted instead, letting your application handle reconnection. |
-| `e2ee` | `LiveKitE2eeOptions` | — | End-to-end encryption options (Linux only). |
+| `e2ee` | `LiveKitE2eeOptions` | — | End-to-end encryption options. |
 
 ```gdscript
 # Example: disable auto-reconnect so you can handle reconnection yourself
