@@ -163,9 +163,11 @@ else:
     env['SHLIBPREFIX'] = 'lib'
     env['SHLIBSUFFIX'] = '.so'
 
-# SharedLibrary automatically appends SHLIBPREFIX/SHLIBSUFFIX, so the
-# target should NOT include the extension or prefix.
-lib_name = f"godot-livekit.{platform}.{arch}"
+# Build the full target name explicitly so that MSVC's SharedLibrary
+# builder does not misparse the dots in the platform/arch portion as a
+# file-extension suffix (which causes "should have exactly one target
+# with the suffix: .dll").
+lib_name = f"{env['SHLIBPREFIX']}godot-livekit.{platform}.{arch}{env['SHLIBSUFFIX']}"
 library = env.SharedLibrary(target=lib_name, source=src_files)
 installed_library = env.Install('addons/godot-livekit/bin', library)
 Default(installed_library)
