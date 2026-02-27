@@ -48,6 +48,9 @@ func test_connect_returns_true():
 	var result = room.connect_to_room("ws://127.0.0.1:1", "t", {})
 	assert_true(result, "connect_to_room should return true (async connect started)")
 	room.disconnect_from_room()
+	# Let background threads finish so the destructor doesn't block the
+	# main thread during GUT's paint cycle (causes segfault).
+	await wait_seconds(0.5)
 
 
 func test_connect_with_empty_options():
@@ -55,6 +58,7 @@ func test_connect_with_empty_options():
 	var result = room.connect_to_room("ws://127.0.0.1:1", "t", {})
 	assert_true(result, "connect with empty options should return true")
 	room.disconnect_from_room()
+	await wait_seconds(0.5)
 
 
 func test_connect_with_auto_subscribe_option():
@@ -62,6 +66,7 @@ func test_connect_with_auto_subscribe_option():
 	var result = room.connect_to_room("ws://127.0.0.1:1", "t", {"auto_subscribe": false})
 	assert_true(result, "connect with auto_subscribe option should be accepted")
 	room.disconnect_from_room()
+	await wait_seconds(0.5)
 
 
 func test_connect_with_auto_reconnect_false():
@@ -69,6 +74,7 @@ func test_connect_with_auto_reconnect_false():
 	var result = room.connect_to_room("ws://127.0.0.1:1", "t", {"auto_reconnect": false})
 	assert_true(result, "connect with auto_reconnect false should be accepted")
 	room.disconnect_from_room()
+	await wait_seconds(0.5)
 
 
 func test_room_is_ref_counted():

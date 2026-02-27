@@ -48,6 +48,13 @@ jobs:
         if: matrix.platform == 'linux'
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxext-dev libxfixes-dev libxinerama-dev libwayland-dev libpipewire-0.3-dev libsystemd-dev
 
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            godot-cpp
+          key: deps-${{ matrix.platform }}-${{ hashFiles('build.sh') }}
+
       - name: Build GDExtension
         shell: bash
         run: ./build.sh ${{ matrix.platform }}

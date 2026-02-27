@@ -15,14 +15,22 @@ func test_connect_emits_connected():
 		"Room SID should not be empty after connecting")
 
 
-func test_invalid_token_emits_disconnected():
+func test_invalid_token_emits_connection_failed():
 	if _skip_if_no_server():
 		return
+	var failed := false
+	var fail_error := ""
+	_room.connection_failed.connect(func(err: String):
+		failed = true
+		fail_error = err
+	)
 	_room.connect_to_room(_livekit_url, "clearly-invalid-token", {})
-	var disconnected = _poll_until(_room, func():
-		return _room.get_connection_state() == LiveKitRoom.STATE_DISCONNECTED, 10.0)
-	assert_true(disconnected,
-		"Room should return to STATE_DISCONNECTED with invalid token")
+	var done = _poll_until(_room, func():
+		return failed or _room.get_connection_state() == LiveKitRoom.STATE_DISCONNECTED, 10.0)
+	assert_true(done, "Room should fail with invalid token")
+	assert_true(failed, "connection_failed signal should fire with invalid token")
+	assert_eq(_room.get_connection_state(), LiveKitRoom.STATE_DISCONNECTED,
+		"Room should be STATE_DISCONNECTED after connection_failed")
 
 
 func test_disconnect_after_connect():

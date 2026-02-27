@@ -19,12 +19,41 @@ LIVEKIT_VERSION="0.3.1"
 GODOT_CPP_VERSION="godot-4.5-stable"
 FRAMETAP_VERSION="0.1.0"
 
+# Verify a downloaded file's SHA-256 hash (if a hash is provided).
+verify_checksum() {
+    local file="$1"
+    local expected_hash="$2"
+    if [ -z "$expected_hash" ]; then
+        return 0 # No hash to verify
+    fi
+    local actual_hash
+    if command -v sha256sum &>/dev/null; then
+        actual_hash=$(sha256sum "$file" | awk '{print $1}')
+    elif command -v shasum &>/dev/null; then
+        actual_hash=$(shasum -a 256 "$file" | awk '{print $1}')
+    else
+        echo -e "${YELLOW}Warning: no sha256sum or shasum found, skipping checksum verification${NC}"
+        return 0
+    fi
+    if [ "$actual_hash" != "$expected_hash" ]; then
+        echo -e "${RED}ERROR: Checksum mismatch for $file${NC}"
+        echo -e "${RED}  Expected: $expected_hash${NC}"
+        echo -e "${RED}  Actual:   $actual_hash${NC}"
+        rm -f "$file"
+        exit 1
+    fi
+    echo -e "${GREEN}Checksum verified for $file${NC}"
+}
+
 # --- Helper Functions ---
+BUILD_TARGET="template_release"
+
 show_usage() {
-    echo -e "${YELLOW}Usage: $0 [linux|macos|windows]${NC}"
+    echo -e "${YELLOW}Usage: $0 [linux|macos|windows] [--debug]${NC}"
     echo "  linux: Build for Linux (x86_64)"
     echo "  macos: Build for macOS (universal)"
     echo "  windows: Build for Windows (x86_64, cross-compile)"
+    echo "  --debug: Build debug variant (template_debug) instead of release"
     exit 1
 }
 
@@ -61,14 +90,20 @@ setup_windows() {
 # Function to check if godot-cpp cache is valid
 check_godotcpp_cache() {
     echo -e "${YELLOW}Checking godot-cpp cache...${NC}"
-    
+
     if [ ! -d "godot-cpp/bin" ] || [ ! -d "godot-cpp/include" ] || [ ! -d "godot-cpp/gen" ]; then
         echo -e "${RED}Cache miss: godot-cpp prebuilt not found${NC}"
         return 1
     fi
-    
-    echo -e "${GREEN}godot-cpp cache is valid!${NC}"
-    return 0
+
+    # Verify version matches
+    if [ -f "godot-cpp/.version" ] && [ "$(cat godot-cpp/.version)" = "$GODOT_CPP_VERSION" ]; then
+        echo -e "${GREEN}godot-cpp cache is valid!${NC}"
+        return 0
+    fi
+
+    echo -e "${RED}Cache miss: godot-cpp version mismatch${NC}"
+    return 1
 }
 
 # Function to fetch godot-cpp prebuilt
@@ -91,6 +126,7 @@ fetch_godotcpp() {
     mv godot-cpp-temp/godot-cpp-prebuilt/* godot-cpp/
     rm -rf godot-cpp-temp "${archive}"
     
+    echo "$GODOT_CPP_VERSION" > godot-cpp/.version
     echo -e "${GREEN}godot-cpp prebuilt downloaded and extracted successfully!${NC}"
 }
 
@@ -133,8 +169,16 @@ fetch_livekit() {
         sed -i.bak 's|#include "livekit/participant.h"|#include "livekit/participant.h"\
 #include "livekit/track.h"|' "$lp_header"
         rm -f "${lp_header}.bak"
+
+        # Verify the patch applied correctly
+        if ! grep -q '#include "livekit/track.h"' "$lp_header"; then
+            echo -e "${RED}ERROR: Failed to patch local_participant.h — the expected #include line was not found.${NC}"
+            echo -e "${RED}The LiveKit SDK header format may have changed. Please patch manually.${NC}"
+            exit 1
+        fi
     fi
 
+    echo "$LIVEKIT_VERSION" > livekit-sdk/.version
     echo -e "${GREEN}LiveKit SDK downloaded and extracted successfully!${NC}"
 }
 
@@ -147,8 +191,13 @@ check_frametap_cache() {
         return 1
     fi
 
-    echo -e "${GREEN}frametap cache is valid!${NC}"
-    return 0
+    if [ -f "frametap/.version" ] && [ "$(cat frametap/.version)" = "$FRAMETAP_VERSION" ]; then
+        echo -e "${GREEN}frametap cache is valid!${NC}"
+        return 0
+    fi
+
+    echo -e "${RED}Cache miss: frametap version mismatch${NC}"
+    return 1
 }
 
 # Function to download frametap
@@ -175,6 +224,7 @@ fetch_frametap() {
     fi
 
     rm "${archive}"
+    echo "$FRAMETAP_VERSION" > frametap/.version
     echo -e "${GREEN}frametap downloaded and extracted successfully!${NC}"
 }
 
@@ -187,8 +237,13 @@ check_livekit_cache() {
         return 1
     fi
 
-    echo -e "${GREEN}livekit SDK cache is valid!${NC}"
-    return 0
+    if [ -f "livekit-sdk/.version" ] && [ "$(cat livekit-sdk/.version)" = "$LIVEKIT_VERSION" ]; then
+        echo -e "${GREEN}livekit SDK cache is valid!${NC}"
+        return 0
+    fi
+
+    echo -e "${RED}Cache miss: livekit SDK version mismatch${NC}"
+    return 1
 }
 
 # Function to install dependencies
@@ -257,8 +312,8 @@ install_dependencies() {
 
 # Function to build the main project
 build_main_project() {
-    echo -e "${YELLOW}Building main project...${NC}"
-    scons $SCONS_FLAGS target=template_release
+    echo -e "${YELLOW}Building main project (${BUILD_TARGET})...${NC}"
+    scons $SCONS_FLAGS target=$BUILD_TARGET
     echo -e "${GREEN}Main project build completed!${NC}"
     
     # Copy shared libraries next to the Godot GDExtension library so they can be loaded
@@ -289,7 +344,26 @@ main() {
         show_usage
     fi
 
-    case "$1" in
+    local platform_arg=""
+    for arg in "$@"; do
+        case "$arg" in
+            --debug)
+                BUILD_TARGET="template_debug"
+                ;;
+            linux|macos|windows)
+                platform_arg="$arg"
+                ;;
+            *)
+                show_usage
+                ;;
+        esac
+    done
+
+    if [ -z "$platform_arg" ]; then
+        show_usage
+    fi
+
+    case "$platform_arg" in
         linux)
             setup_linux
             ;;
@@ -298,9 +372,6 @@ main() {
             ;;
         windows)
             setup_windows
-            ;;
-        *)
-            show_usage
             ;;
     esac
 

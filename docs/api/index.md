@@ -11,17 +11,18 @@ Represents a LiveKit room. Handles connecting, disconnecting, and room-level sig
 
 **Properties:**
 *   `local_participant: LiveKitLocalParticipant` (read-only): The local participant object.
-*   `remote_participants: Dictionary` (read-only): Remote participants, keyed by their SID.
+*   `remote_participants: Dictionary` (read-only): Remote participants, keyed by their identity.
 *   `sid: String` (read-only): The room's unique Session ID.
 *   `name: String` (read-only): The room's name.
 *   `metadata: String` (read-only): The room's metadata.
 *   `connection_state: int` (read-only): The current connection state (see `ConnectionState` enum).
 
 **Methods:**
-*   `connect_to_room(url: String, token: String, options: Dictionary) -> bool`: Connects to a LiveKit server using the provided WebSocket URL and access token. Options: `auto_subscribe` (default `true`), `dynacast` (default `false`), `auto_reconnect` (default `true`), `e2ee` (a `LiveKitE2eeOptions`).
-*   `disconnect_from_room()`: Disconnects from the current room.
+*   `connect_to_room(url: String, token: String, options: Dictionary) -> bool`: Starts connecting to a LiveKit server using the provided WebSocket URL and access token. The connection runs on a background thread and never blocks the main thread — always returns `true` to indicate the connection attempt was started. The actual result arrives via the `connected` or `connection_failed` signals. Options: `auto_subscribe` (default `true`), `dynacast` (default `false`), `auto_reconnect` (default `true`), `connect_timeout` (default `15.0` seconds, `0` to disable), `e2ee` (a `LiveKitE2eeOptions`).
+*   `disconnect_from_room()`: Disconnects from the current room. This is always non-blocking — background threads are given a short grace period and then detached if still running.
+*   `poll_events()`: Drains the event queue and emits any pending signals. Call this in `_process()` to receive room signals. Also checks `connect_timeout` and emits `connection_failed` if the timeout has elapsed.
 *   `get_local_participant() -> LiveKitLocalParticipant`: Returns the local participant object.
-*   `get_remote_participants() -> Dictionary`: Returns a dictionary of remote participants, keyed by their SID.
+*   `get_remote_participants() -> Dictionary`: Returns a dictionary of remote participants, keyed by their identity.
 *   `get_sid() -> String`: Returns the room's unique Session ID.
 *   `get_name() -> String`: Returns the room's name.
 *   `get_metadata() -> String`: Returns the room's metadata.
@@ -31,6 +32,7 @@ Represents a LiveKit room. Handles connecting, disconnecting, and room-level sig
 **Signals:**
 *   `connected`: Emitted when successfully connected to the room.
 *   `disconnected`: Emitted when disconnected from the room.
+*   `connection_failed(error: String)`: Emitted when a connection attempt fails (e.g. timeout). The error string describes the reason.
 *   `reconnecting`: Emitted when the connection is attempting to reconnect.
 *   `reconnected`: Emitted when the connection has successfully reconnected.
 *   `participant_connected(participant: LiveKitRemoteParticipant)`: Emitted when a new remote participant joins the room.
@@ -59,6 +61,8 @@ Represents a LiveKit room. Handles connecting, disconnecting, and room-level sig
 
 ## Participants
 
+> **Object Lifetime:** `LiveKitParticipant`, `LiveKitTrack`, and `LiveKitTrackPublication` objects hold non-owning references to internal SDK state. These objects become **stale** after the participant disconnects, the room disconnects, or the track is unpublished. Accessing properties on a stale object returns default values (empty strings, `0`, `false`). Do not cache these objects across connection lifecycles — obtain fresh references after reconnecting.
+
 ### `LiveKitParticipant`
 Base class for a user in the room.
 
@@ -85,13 +89,11 @@ Represents the local user. Handles publishing tracks, data, and RPC.
 *   `publish_track(track: LiveKitTrack, options: Dictionary) -> LiveKitLocalTrackPublication`: Publishes a local track to the room.
 *   `unpublish_track(track_sid: String)`: Unpublishes a track by its SID.
 *   `perform_rpc(destination: String, method: String, payload: String, timeout: float)`: Performs an asynchronous remote procedure call to another participant. The result is delivered via the `rpc_response_received` signal; errors via the `rpc_error` signal.
-*   `register_rpc_method(method: String)`: Registers a method name to receive RPC calls.
+*   `register_rpc_method(method: String)`: Registers a method name to receive RPC calls. The registered handler is invoked synchronously by the SDK — return a value from the handler callback to respond. Async responses are not yet supported.
 *   `unregister_rpc_method(method: String)`: Unregisters an RPC method.
-*   `respond_to_rpc(request_id: String, payload: String)`: Responds to an incoming RPC request.
-*   `respond_to_rpc_error(request_id: String, code: int, message: String)`: Responds to an incoming RPC request with an error.
 
 **Signals:**
-*   `rpc_method_invoked(method: String, request_id: String, caller_identity: String, payload: String, response_timeout: float)`: Emitted when an RPC method is invoked by a remote participant. Use `respond_to_rpc()` or `respond_to_rpc_error()` with the `request_id` to reply.
+*   `rpc_method_invoked(method: String, request_id: String, caller_identity: String, payload: String, response_timeout: float)`: Emitted when an RPC method is invoked by a remote participant. Note: async responses via `respond_to_rpc()` are not yet supported by the underlying SDK. The handler returns `nullopt` (treated as an application error by the caller).
 *   `rpc_response_received(method: String, result: String)`: Emitted when an outgoing RPC call succeeds. Contains the method name and the response payload.
 *   `rpc_error(method: String, error_message: String)`: Emitted when an outgoing RPC call fails.
 

@@ -209,21 +209,14 @@ LiveKitFrameCryptor::LiveKitFrameCryptor() {
 }
 
 LiveKitFrameCryptor::~LiveKitFrameCryptor() {
-    if (frame_cryptor_) {
-        delete frame_cryptor_;
-        frame_cryptor_ = nullptr;
-    }
 }
 
-void LiveKitFrameCryptor::bind_frame_cryptor(livekit::E2EEManager::FrameCryptor *fc) {
+void LiveKitFrameCryptor::bind_frame_cryptor(std::unique_ptr<livekit::E2EEManager::FrameCryptor> fc) {
+    frame_cryptor_ = std::move(fc);
     if (frame_cryptor_) {
-        delete frame_cryptor_;
-    }
-    frame_cryptor_ = fc;
-    if (fc) {
-        participant_identity_ = String(fc->participantIdentity().c_str());
-        key_index_ = fc->keyIndex();
-        enabled_ = fc->enabled();
+        participant_identity_ = String(frame_cryptor_->participantIdentity().c_str());
+        key_index_ = frame_cryptor_->keyIndex();
+        enabled_ = frame_cryptor_->enabled();
     }
 }
 
@@ -328,9 +321,7 @@ Array LiveKitE2eeManager::get_frame_cryptors() const {
     for (auto &fc : cryptors) {
         Ref<LiveKitFrameCryptor> godot_fc;
         godot_fc.instantiate();
-        // Move the FrameCryptor to heap so it can outlive the vector
-        auto *heap_fc = new livekit::E2EEManager::FrameCryptor(std::move(fc));
-        godot_fc->bind_frame_cryptor(heap_fc);
+        godot_fc->bind_frame_cryptor(std::make_unique<livekit::E2EEManager::FrameCryptor>(std::move(fc)));
         result.push_back(godot_fc);
     }
     return result;

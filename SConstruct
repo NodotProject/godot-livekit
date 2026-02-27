@@ -16,13 +16,15 @@ if not platform:
 target = ARGUMENTS.get('target', 'template_release')
 arch = ARGUMENTS.get('arch', 'universal' if platform == 'macos' else 'x86_64')
 
+is_windows = platform == 'windows'
+
 # Set up the environment based on the platform
 use_mingw_arg = ARGUMENTS.get('use_mingw', 'no')
 use_mingw = use_mingw_arg.lower() in ['yes', 'true', '1']
 
-if platform == 'windows' and not use_mingw:
+if is_windows and not use_mingw:
     env = Environment(tools=['default', 'msvc'])
-elif platform == 'windows' and use_mingw:
+elif is_windows and use_mingw:
     env = Environment(tools=['gcc', 'g++', 'gnulink', 'ar', 'gas'])
     cc_cmd = os.environ.get('CC', 'x86_64-w64-mingw32-gcc')
     cxx_cmd = os.environ.get('CXX', 'x86_64-w64-mingw32-g++')
@@ -54,7 +56,6 @@ if use_mingw and is_windows:
 
 env.Append(LIBPATH=['godot-cpp/bin', 'livekit-sdk/lib', 'frametap/lib'])
 
-is_windows = platform == 'windows'
 if is_windows and not use_mingw:
     env.Append(CXXFLAGS=['/std:c++20', '/EHsc', '/MT'])
     env.Append(CPPDEFINES=['WIN32', '_WIN32', 'WINDOWS_ENABLED', 'TYPED_METHOD_BIND', 'NOMINMAX'])
@@ -162,13 +163,9 @@ else:
     env['SHLIBPREFIX'] = 'lib'
     env['SHLIBSUFFIX'] = '.so'
 
+# SharedLibrary automatically appends SHLIBPREFIX/SHLIBSUFFIX, so the
+# target should NOT include the extension or prefix.
 lib_name = f"godot-livekit.{platform}.{arch}"
-if platform == 'windows' and not lib_name.endswith('.dll'):
-    lib_name += '.dll'
-elif platform == 'macos' and not lib_name.endswith('.dylib'):
-    lib_name += '.dylib'
-elif platform == 'linux' and not lib_name.endswith('.so'):
-    lib_name += '.so'
 library = env.SharedLibrary(target=lib_name, source=src_files)
 installed_library = env.Install('addons/godot-livekit/bin', library)
 Default(installed_library)

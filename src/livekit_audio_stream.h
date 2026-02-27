@@ -13,9 +13,10 @@
 
 #include <memory>
 #include <mutex>
-#include <thread>
 #include <atomic>
 #include <vector>
+
+#include "detachable_thread.h"
 
 namespace godot {
 
@@ -26,11 +27,15 @@ private:
     std::shared_ptr<livekit::AudioStream> stream_;
     std::mutex audio_mutex_;
     std::vector<float> audio_buffer_;
-    std::thread reader_thread_;
+    static constexpr size_t kMaxAudioBufferSamples = 48000 * 2 * 5; // ~5 seconds stereo at 48kHz
+    DetachableThread reader_thread_;
     std::atomic<bool> running_{false};
-    std::atomic<bool> thread_exited_{false};
     std::atomic<int> sample_rate_{48000};
     std::atomic<int> num_channels_{1};
+    std::atomic<uint32_t> lock_contention_count_{0};
+
+    // Shared sentinel: stays valid even if `this` is freed after detach.
+    std::shared_ptr<std::atomic<bool>> alive_ = std::make_shared<std::atomic<bool>>(true);
 
     void _reader_loop();
 

@@ -14,13 +14,6 @@ using namespace godot;
 
 namespace {
 
-Dictionary rtc_stats_data_to_dict(const livekit::RtcStatsData &d) {
-    Dictionary dict;
-    dict["id"] = String(d.id.c_str());
-    dict["timestamp_ms"] = d.timestamp_ms;
-    return dict;
-}
-
 Dictionary inbound_rtp_to_dict(const livekit::RtcInboundRtpStats &s) {
     Dictionary dict;
     dict["type"] = "inbound_rtp";
@@ -287,6 +280,7 @@ LiveKitTrack::LiveKitTrack() {
 }
 
 LiveKitTrack::~LiveKitTrack() {
+    stats_thread_.join_or_detach(2000);
 }
 
 void LiveKitTrack::bind_track(const std::shared_ptr<livekit::Track> &track) {
@@ -351,7 +345,8 @@ void LiveKitTrack::request_stats() {
     // Capture shared_ptr so the native track stays alive for the duration
     std::shared_ptr<livekit::Track> track_copy = track_;
 
-    std::thread([prevent_free, track_copy]() {
+    stats_thread_.join_or_detach(2000);
+    stats_thread_.start([prevent_free, track_copy]() {
         try {
             auto future = track_copy->getStats();
             auto status = future.wait_for(std::chrono::seconds(5));
@@ -368,7 +363,7 @@ void LiveKitTrack::request_stats() {
         } catch (const std::exception &e) {
             UtilityFunctions::push_error("LiveKitTrack::request_stats: error: ", String(e.what()));
         }
-    }).detach();
+    });
 }
 
 // LiveKitLocalAudioTrack

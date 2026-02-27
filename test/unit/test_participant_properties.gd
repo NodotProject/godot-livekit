@@ -74,11 +74,11 @@ func test_unbound_local_publish_data_no_crash():
 	var data := PackedByteArray([1, 2, 3])
 	# Should not crash — null guard prints error and returns
 	lp.publish_data(data, true, PackedStringArray(), "")
-	assert_true(true, "publish_data on unbound participant should not crash")
+	assert_push_error("not bound")
 
 
 func test_unbound_local_set_metadata_no_crash():
 	var lp := LiveKitLocalParticipant.new()
 	# Should not crash — null guard returns early
 	lp.set_metadata("test")
-	assert_true(true, "set_metadata on unbound participant should not crash")
+	assert_push_error("not bound")

@@ -105,8 +105,10 @@ void LiveKitLocalParticipant::_bind_methods() {
     ClassDB::bind_method(D_METHOD("perform_rpc", "destination", "method", "payload", "timeout"), &LiveKitLocalParticipant::perform_rpc, DEFVAL(10.0));
     ClassDB::bind_method(D_METHOD("register_rpc_method", "method"), &LiveKitLocalParticipant::register_rpc_method);
     ClassDB::bind_method(D_METHOD("unregister_rpc_method", "method"), &LiveKitLocalParticipant::unregister_rpc_method);
-    ClassDB::bind_method(D_METHOD("respond_to_rpc", "request_id", "payload"), &LiveKitLocalParticipant::respond_to_rpc);
-    ClassDB::bind_method(D_METHOD("respond_to_rpc_error", "request_id", "code", "message"), &LiveKitLocalParticipant::respond_to_rpc_error);
+    // respond_to_rpc / respond_to_rpc_error are not exposed: the underlying
+    // SDK requires synchronous responses from the handler callback, so async
+    // RPC replies are not yet supported.  The handler returns nullopt which
+    // the SDK treats as an application error.
 
     ADD_SIGNAL(MethodInfo("rpc_method_invoked",
             PropertyInfo(Variant::STRING, "method"),
@@ -128,6 +130,9 @@ LiveKitLocalParticipant::LiveKitLocalParticipant() {
 }
 
 LiveKitLocalParticipant::~LiveKitLocalParticipant() {
+    // Wait for any in-flight RPC thread.
+    rpc_thread_.join_or_detach(2000);
+
     // Unregister all RPC methods so the SDK doesn't invoke callbacks
     // into a freed object.
     if (local_participant_) {
@@ -273,7 +278,9 @@ void LiveKitLocalParticipant::perform_rpc(const String &destination, const Strin
 
     // Run the blocking SDK call on a background thread; deliver the result
     // back to the main thread via signal (call_deferred is thread-safe).
-    std::thread([prevent_free, dest_str, method_str, payload_str, timeout, method_for_signal]() {
+    // Wait for any previous RPC thread to finish before starting a new one.
+    rpc_thread_.join_or_detach(2000);
+    rpc_thread_.start([prevent_free, dest_str, method_str, payload_str, timeout, method_for_signal]() {
         try {
             std::string result = prevent_free->local_participant_->performRpc(
                     dest_str, method_str, payload_str, timeout);
@@ -283,7 +290,7 @@ void LiveKitLocalParticipant::perform_rpc(const String &destination, const Strin
             prevent_free->call_deferred("emit_signal", "rpc_error",
                     method_for_signal, String(e.message().c_str()));
         }
-    }).detach();
+    });
 }
 
 void LiveKitLocalParticipant::register_rpc_method(const String &method) {

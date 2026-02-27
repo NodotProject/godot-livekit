@@ -20,6 +20,7 @@ func test_audio_stream_from_track_null():
 	var result = LiveKitAudioStream.from_track(null)
 	assert_null(result,
 		"from_track(null) should return null")
+	assert_push_error("invalid track")
 
 
 func test_audio_stream_from_track_unbound():
@@ -27,6 +28,7 @@ func test_audio_stream_from_track_unbound():
 	var result = LiveKitAudioStream.from_track(track)
 	assert_null(result,
 		"from_track with unbound track should return null")
+	assert_push_error("invalid track")
 
 
 func test_audio_stream_close_default():

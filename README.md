@@ -76,6 +76,10 @@ func _ready():
     room.data_received.connect(_on_data_received)
     room.connect_to_room("wss://your-server.url", "your-token", {})
 
+func _process(_delta):
+    if room:
+        room.poll_events()
+
 func _on_connected():
     print("Connected as: ", room.get_local_participant().get_identity())
 

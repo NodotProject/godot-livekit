@@ -78,6 +78,7 @@ func test_key_provider_unbound():
 	var key = kp.get_shared_key(0)
 	assert_eq(key.size(), 0,
 		"Unbound key provider should return empty key")
+	assert_push_error(2)
 
 
 func test_frame_cryptor_unbound_defaults():
@@ -98,7 +99,7 @@ func test_frame_cryptor_set_enabled_unbound():
 	var fc = ClassDB.instantiate("LiveKitFrameCryptor")
 	# Should not crash
 	fc.set_enabled(true)
-	assert_true(true, "set_enabled on unbound frame cryptor should not crash")
+	assert_push_error("not bound")
 
 
 func test_e2ee_manager_unbound_not_enabled():

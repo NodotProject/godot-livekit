@@ -9,6 +9,8 @@
 
 #include <livekit/e2ee.h>
 
+#include <memory>
+
 namespace godot {
 
 class LiveKitE2eeOptions : public RefCounted {
@@ -86,7 +88,7 @@ private:
     bool enabled_ = false;
 
     // We store copies since FrameCryptor objects from frameCryptors() are returned by value
-    livekit::E2EEManager::FrameCryptor *frame_cryptor_ = nullptr;
+    std::unique_ptr<livekit::E2EEManager::FrameCryptor> frame_cryptor_;
 
 protected:
     static void _bind_methods();
@@ -95,7 +97,7 @@ public:
     LiveKitFrameCryptor();
     ~LiveKitFrameCryptor();
 
-    void bind_frame_cryptor(livekit::E2EEManager::FrameCryptor *fc);
+    void bind_frame_cryptor(std::unique_ptr<livekit::E2EEManager::FrameCryptor> fc);
 
     String get_participant_identity() const;
     int get_key_index() const;

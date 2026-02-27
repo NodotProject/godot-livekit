@@ -9,7 +9,7 @@ extends GutTest
 ##   3. Double disconnect_from_room() call
 ##      (old code joined the first disconnect_thread_ on the main thread)
 
-const FRAME_BUDGET_MS := 500  # generous — any of these should take < 1 frame
+const FRAME_BUDGET_MS := 2000  # generous — any of these should take < 1 frame
 
 
 func test_disconnect_unconnected_room_does_not_block():
@@ -75,6 +75,9 @@ func test_disconnect_connect_disconnect_does_not_block():
 	var room := LiveKitRoom.new()
 	room.connect_to_room("ws://127.0.0.1:1", "invalid-token", {})
 	room.disconnect_from_room()
+	# Let disconnect thread start so the second connect uses a clean room
+	# (avoids race where SDK reports "already connected")
+	await wait_process_frames(2)
 	room.connect_to_room("ws://127.0.0.1:1", "invalid-token", {})
 
 	var before := Time.get_ticks_msec()

@@ -14,8 +14,9 @@
 
 #include <memory>
 #include <mutex>
-#include <thread>
 #include <atomic>
+
+#include "detachable_thread.h"
 
 namespace godot {
 
@@ -27,10 +28,13 @@ private:
     Ref<ImageTexture> texture_;
     std::mutex frame_mutex_;
     std::unique_ptr<livekit::VideoFrame> pending_frame_;
-    std::thread reader_thread_;
+    DetachableThread reader_thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> thread_started_{false};
-    std::atomic<bool> thread_exited_{false};
+    std::atomic<uint32_t> lock_contention_count_{0};
+
+    // Shared sentinel: stays valid even if `this` is freed after detach.
+    std::shared_ptr<std::atomic<bool>> alive_ = std::make_shared<std::atomic<bool>>(true);
 
     void _reader_loop();
     void _ensure_reader_started();

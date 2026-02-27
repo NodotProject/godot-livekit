@@ -16,19 +16,23 @@ var room: LiveKitRoom
 func _ready():
     # 1. Instantiate the room
     room = LiveKitRoom.new()
-    
+
     # 2. Connect to signals to handle room events
     room.connected.connect(_on_room_connected)
     room.disconnected.connect(_on_room_disconnected)
+    room.connection_failed.connect(_on_connection_failed)
     room.participant_connected.connect(_on_participant_connected)
-    
+
     # 3. Connect to the LiveKit server
     var url = "wss://your-livekit-server.url"
     var token = "your-access-token"
-    
-    var success = room.connect_to_room(url, token, {})
-    if not success:
-        print("Failed to initiate connection.")
+
+    room.connect_to_room(url, token, {})
+
+# 4. Poll for events every frame — this drives signal delivery
+func _process(_delta):
+    if room:
+        room.poll_events()
 
 func _on_room_connected():
     print("Successfully connected to the room!")
@@ -36,6 +40,9 @@ func _on_room_connected():
 
 func _on_room_disconnected():
     print("Disconnected from the room.")
+
+func _on_connection_failed(error):
+    print("Connection failed: ", error)
 
 func _on_participant_connected(participant):
     print("Participant joined: ", participant.get_identity())
@@ -108,8 +115,9 @@ func setup_rpc():
 
 func _on_rpc_invoked(method, request_id, caller_identity, payload, response_timeout):
     print("RPC from ", caller_identity, ": ", method, " -> ", payload)
-    # Respond to the caller
-    room.get_local_participant().respond_to_rpc(request_id, "Hello back!")
+    # Note: async RPC responses are not yet supported by the underlying SDK.
+    # The handler currently returns nullopt, which the caller sees as an error.
+    # Synchronous response support is planned for a future SDK release.
 
 func call_remote_greet(target_identity: String):
     # perform_rpc is async — the result arrives via rpc_response_received signal
@@ -226,12 +234,61 @@ The `connect_to_room()` method accepts an options dictionary with the following 
 | `auto_subscribe` | `bool` | `true` | Automatically subscribe to tracks published by remote participants. |
 | `dynacast` | `bool` | `false` | Enable dynacast for adaptive simulcast. |
 | `auto_reconnect` | `bool` | `true` | Allow the SDK to automatically reconnect on network disruption. When `false`, a `disconnected` signal is emitted instead, letting your application handle reconnection. |
+| `connect_timeout` | `float` | `15.0` | Maximum time in seconds to wait for the connection to succeed. If exceeded, a `connection_failed` signal is emitted with a timeout error. Set to `0` to disable. |
 | `e2ee` | `LiveKitE2eeOptions` | — | End-to-end encryption options. |
 
 ```gdscript
 # Example: disable auto-reconnect so you can handle reconnection yourself
 room.connect_to_room(url, token, {"auto_reconnect": false, "dynacast": true})
 ```
+
+## Event Queue and `poll_events()`
+
+Godot-LiveKit uses a **background-thread event queue** pattern. The LiveKit C++ SDK fires callbacks on its own internal threads, but Godot is not thread-safe — calling any Godot API (signals, Dictionary access, Ref creation) from a non-main thread will crash the engine.
+
+To bridge this gap, all SDK callbacks capture lightweight C++ data and push a lambda onto a thread-safe queue. When you call `room.poll_events()` from your `_process()` callback, the queue is drained and signals are emitted safely on the main thread.
+
+**Key points:**
+
+- You **must** call `room.poll_events()` every frame to receive signals. Without it, no room events will be delivered.
+- `poll_events()` also checks the connection timeout — if `connect_timeout` seconds have elapsed, it emits `connection_failed`.
+- For video/audio streams, call `video_stream.poll()` and `audio_stream.poll(playback)` separately — these are independent of the room event queue.
+
+```gdscript
+func _process(_delta):
+    if room:
+        room.poll_events()
+    if video_stream:
+        video_stream.poll()
+    if audio_stream and playback:
+        audio_stream.poll(playback)
+```
+
+## Troubleshooting
+
+### No signals are being emitted
+
+Make sure you are calling `room.poll_events()` in `_process()`. All signals are queued internally and only delivered when `poll_events()` is called.
+
+### Connection hangs or times out
+
+- The `connect_to_room()` call runs `Connect()` on a background thread and returns immediately. The default timeout is 15 seconds.
+- If you see `connection_failed` with a timeout error, check that your LiveKit server URL and access token are correct.
+- You can adjust the timeout via the `connect_timeout` option (set to `0` to disable).
+
+### macOS screen capture permissions
+
+On macOS, screen capture requires explicit user permission. Call `LiveKitScreenCapture.check_permissions()` before creating a capture to check the current status. If the status is `PERMISSION_ERROR`, the user needs to grant Screen Recording permission in System Settings > Privacy & Security > Screen Recording.
+
+### Video frames appear to drop
+
+If `video_stream.poll()` frequently returns `false` even when frames should be arriving, it may be due to lock contention between the reader thread and the main thread. A warning will be logged to the Godot console if this happens repeatedly. This is usually harmless at low rates but may indicate the main thread `_process()` is too slow.
+
+### Audio playback is choppy
+
+- Ensure the `AudioStreamGenerator` mix rate matches the remote audio sample rate (typically 48000 Hz).
+- Call `audio_stream.poll(playback)` every frame in `_process()`.
+- If lock contention warnings appear in the console, the main thread may be too slow to keep up with incoming audio.
 
 ## Next Steps
 

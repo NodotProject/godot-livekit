@@ -43,12 +43,14 @@ func test_create_for_monitor_invalid_dict_returns_null():
 	var result = LiveKitScreenCapture.create_for_monitor({})
 	assert_null(result,
 		"create_for_monitor with empty dict should return null")
+	assert_push_error("missing 'id' key")
 
 
 func test_create_for_window_invalid_dict_returns_null():
 	var result = LiveKitScreenCapture.create_for_window({})
 	assert_null(result,
 		"create_for_window with empty dict should return null")
+	assert_push_error("missing 'id' key")
 
 
 func test_default_texture_null():
@@ -98,6 +100,7 @@ func test_screenshot_uninitialized_returns_null():
 	var result = capture.screenshot()
 	assert_null(result,
 		"screenshot() on uninitialized capture should return null")
+	assert_push_error("not initialized")
 
 
 func test_close_uninitialized_no_crash():
@@ -109,7 +112,7 @@ func test_close_uninitialized_no_crash():
 func test_start_uninitialized_no_crash():
 	var capture := LiveKitScreenCapture.new()
 	capture.start()
-	assert_true(true, "start() on uninitialized capture should not crash")
+	assert_push_error("not initialized")
 
 
 # --- Display-dependent tests (guarded for CI) ---

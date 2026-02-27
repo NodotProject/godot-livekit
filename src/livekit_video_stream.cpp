@@ -19,6 +19,7 @@ LiveKitVideoStream::LiveKitVideoStream() {
 }
 
 LiveKitVideoStream::~LiveKitVideoStream() {
+    alive_->store(false);
     close();
 }
 
@@ -26,10 +27,11 @@ void LiveKitVideoStream::_reader_loop() {
     // Capture a local copy so the native stream stays alive even if
     // close() calls stream_.reset() on another thread.
     auto stream = stream_;
-    while (running_.load()) {
+    auto alive = alive_;
+    while (running_.load() && alive->load()) {
         livekit::VideoFrameEvent event;
         bool ok = stream->read(event);
-        if (!ok) {
+        if (!ok || !alive->load()) {
             break;
         }
 
@@ -40,7 +42,6 @@ void LiveKitVideoStream::_reader_loop() {
             pending_frame_ = std::move(frame);
         }
     }
-    thread_exited_.store(true);
 }
 
 Ref<LiveKitVideoStream> LiveKitVideoStream::from_track(const Ref<LiveKitTrack> &track) {
@@ -101,7 +102,10 @@ void LiveKitVideoStream::_ensure_reader_started() {
         return; // Already started
     }
     running_.store(true);
-    reader_thread_ = std::thread(&LiveKitVideoStream::_reader_loop, this);
+    auto alive = alive_;
+    reader_thread_.start([this, alive]() {
+        if (alive->load()) { _reader_loop(); }
+    });
 }
 
 bool LiveKitVideoStream::poll() {
@@ -111,8 +115,15 @@ bool LiveKitVideoStream::poll() {
 
     {
         std::unique_lock<std::mutex> lock(frame_mutex_, std::try_to_lock);
-        if (!lock.owns_lock() || !pending_frame_) {
-            return false; // Reader thread holds the lock or no frame; skip
+        if (!lock.owns_lock()) {
+            uint32_t count = lock_contention_count_.fetch_add(1) + 1;
+            if (count == 1 || (count % 100) == 0) {
+                UtilityFunctions::push_warning("LiveKitVideoStream::poll: lock contention (", count, " skipped frames)");
+            }
+            return false;
+        }
+        if (!pending_frame_) {
+            return false;
         }
         frame = std::move(pending_frame_);
     }
@@ -143,17 +154,7 @@ void LiveKitVideoStream::close() {
     if (stream_) {
         stream_->close();
     }
-    if (thread_started_.load() && reader_thread_.joinable()) {
-        // stream_->close() should make read() return false promptly.
-        // Wait up to 2 seconds as a safety net; detach if the thread doesn't exit.
-        for (int i = 0; i < 2000 && !thread_exited_.load(); ++i) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-        if (thread_exited_.load()) {
-            reader_thread_.join();
-        } else {
-            reader_thread_.detach();
-        }
-    }
+    reader_thread_.join_or_detach(2000);
     stream_.reset();
+    thread_started_.store(false);
 }

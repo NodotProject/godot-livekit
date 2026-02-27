@@ -13,7 +13,8 @@
 #include <livekit/remote_video_track.h>
 
 #include <memory>
-#include <thread>
+
+#include "detachable_thread.h"
 
 namespace godot {
 
@@ -47,6 +48,7 @@ public:
 protected:
     static void _bind_methods();
     std::shared_ptr<livekit::Track> track_;
+    DetachableThread stats_thread_;
 
 public:
     LiveKitTrack();
