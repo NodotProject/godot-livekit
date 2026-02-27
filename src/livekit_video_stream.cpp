@@ -62,8 +62,6 @@ Ref<LiveKitVideoStream> LiveKitVideoStream::from_track(const Ref<LiveKitTrack> &
     stream.instantiate();
     stream->stream_ = native_stream;
     stream->texture_.instantiate();
-    stream->running_.store(true);
-    stream->reader_thread_ = std::thread(&LiveKitVideoStream::_reader_loop, stream.ptr());
 
     return stream;
 }
@@ -90,8 +88,6 @@ Ref<LiveKitVideoStream> LiveKitVideoStream::from_participant(const Ref<LiveKitRe
     stream.instantiate();
     stream->stream_ = native_stream;
     stream->texture_.instantiate();
-    stream->running_.store(true);
-    stream->reader_thread_ = std::thread(&LiveKitVideoStream::_reader_loop, stream.ptr());
 
     return stream;
 }
@@ -100,7 +96,17 @@ Ref<ImageTexture> LiveKitVideoStream::get_texture() const {
     return texture_;
 }
 
+void LiveKitVideoStream::_ensure_reader_started() {
+    if (thread_started_.exchange(true)) {
+        return; // Already started
+    }
+    running_.store(true);
+    reader_thread_ = std::thread(&LiveKitVideoStream::_reader_loop, this);
+}
+
 bool LiveKitVideoStream::poll() {
+    _ensure_reader_started();
+
     std::unique_ptr<livekit::VideoFrame> frame;
 
     {
@@ -137,7 +143,7 @@ void LiveKitVideoStream::close() {
     if (stream_) {
         stream_->close();
     }
-    if (reader_thread_.joinable()) {
+    if (thread_started_.load() && reader_thread_.joinable()) {
         // stream_->close() should make read() return false promptly.
         // Wait up to 2 seconds as a safety net; detach if the thread doesn't exit.
         for (int i = 0; i < 2000 && !thread_exited_.load(); ++i) {
