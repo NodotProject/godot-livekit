@@ -29,10 +29,8 @@ func _ready():
 
     room.connect_to_room(url, token, {})
 
-# 4. Poll for events every frame — this drives signal delivery
-func _process(_delta):
-    if room:
-        room.poll_events()
+# No _process() needed — auto_poll is true by default, so poll_events()
+# is called automatically every frame by the built-in poller.
 
 func _on_room_connected():
     print("Successfully connected to the room!")
@@ -70,9 +68,7 @@ func _on_track_subscribed(track, publication, participant):
         video_stream = LiveKitVideoStream.from_track(track)
         texture_rect.texture = video_stream.get_texture()
 
-func _process(_delta):
-    if video_stream:
-        video_stream.poll()
+# No _process() needed — video streams are auto-polled by default.
 ```
 
 ## Publishing Audio
@@ -115,9 +111,6 @@ func setup_rpc():
 
 func _on_rpc_invoked(method, request_id, caller_identity, payload, response_timeout):
     print("RPC from ", caller_identity, ": ", method, " -> ", payload)
-    # Note: async RPC responses are not yet supported by the underlying SDK.
-    # The handler currently returns nullopt, which the caller sees as an error.
-    # Synchronous response support is planned for a future SDK release.
 
 func call_remote_greet(target_identity: String):
     # perform_rpc is async — the result arrives via rpc_response_received signal
@@ -161,6 +154,8 @@ func _process(_delta):
         if image:
             video_source.capture_frame(image, Time.get_ticks_usec(), 0)
 ```
+
+> **Avoid using `frame_received` for per-frame work.** The `frame_received` signal fires on every captured frame, which can be 30-60+ fps. Connecting heavy operations like image processing or `capture_frame()` to this signal adds overhead from signal dispatch and blocks the main thread at capture rate. Instead, poll manually in `_process()` as shown above — this gives you full control over when frames are consumed and avoids unnecessary signal overhead. Note: set `screen_capture.auto_poll = false` when calling `poll()` yourself to avoid double-polling.
 
 You can also capture a specific window:
 
@@ -242,33 +237,34 @@ The `connect_to_room()` method accepts an options dictionary with the following 
 room.connect_to_room(url, token, {"auto_reconnect": false, "dynacast": true})
 ```
 
-## Event Queue and `poll_events()`
+## Auto-Polling and `poll_events()`
 
 Godot-LiveKit uses a **background-thread event queue** pattern. The LiveKit C++ SDK fires callbacks on its own internal threads, but Godot is not thread-safe — calling any Godot API (signals, Dictionary access, Ref creation) from a non-main thread will crash the engine.
 
-To bridge this gap, all SDK callbacks capture lightweight C++ data and push a lambda onto a thread-safe queue. When you call `room.poll_events()` from your `_process()` callback, the queue is drained and signals are emitted safely on the main thread.
+To bridge this gap, all SDK callbacks capture lightweight C++ data and push a lambda onto a thread-safe queue. Every frame, `poll_events()` / `poll()` drains the queue and emits signals safely on the main thread.
 
-**Key points:**
+**Auto-polling (default):** All `LiveKitRoom`, `LiveKitVideoStream`, and `LiveKitScreenCapture` objects have `auto_poll = true` by default. A built-in frame callback automatically calls their poll methods every frame — no `_process()` code required.
 
-- You **must** call `room.poll_events()` every frame to receive signals. Without it, no room events will be delivered.
-- `poll_events()` also checks the connection timeout — if `connect_timeout` seconds have elapsed, it emits `connection_failed`.
-- For video/audio streams, call `video_stream.poll()` and `audio_stream.poll(playback)` separately — these are independent of the room event queue.
+**Manual polling:** Set `auto_poll = false` on any object to take control of when polling happens. This is useful if you want to poll at a different rate or in a specific order.
+
+**Audio streams** are the exception — `LiveKitAudioStream.poll()` requires an `AudioStreamGeneratorPlayback` argument, so it cannot be auto-polled. You must call it manually:
 
 ```gdscript
 func _process(_delta):
-    if room:
-        room.poll_events()
-    if video_stream:
-        video_stream.poll()
     if audio_stream and playback:
         audio_stream.poll(playback)
 ```
+
+**Key points:**
+
+- `poll_events()` also checks the connection timeout — if `connect_timeout` seconds have elapsed, it emits `connection_failed`.
+- If you disable `auto_poll`, you **must** call the poll methods yourself or signals will not be delivered.
 
 ## Troubleshooting
 
 ### No signals are being emitted
 
-Make sure you are calling `room.poll_events()` in `_process()`. All signals are queued internally and only delivered when `poll_events()` is called.
+By default, `auto_poll` is `true` and signals are delivered automatically each frame. If you set `auto_poll = false`, make sure you are calling `room.poll_events()` in `_process()` — signals are queued internally and only delivered when `poll_events()` is called.
 
 ### Connection hangs or times out
 

@@ -17,7 +17,7 @@ ARCH=""
 SCONS_FLAGS=""
 LIVEKIT_VERSION="0.3.1"
 GODOT_CPP_VERSION="godot-4.5-stable"
-FRAMETAP_VERSION="0.1.0"
+FRAMETAP_VERSION="0.1.3"
 
 # Verify a downloaded file's SHA-256 hash (if a hash is provided).
 verify_checksum() {
@@ -49,9 +49,9 @@ verify_checksum() {
 BUILD_TARGET="template_release"
 
 show_usage() {
-    echo -e "${YELLOW}Usage: $0 [linux|macos|windows] [--debug]${NC}"
+    echo -e "${YELLOW}Usage: $0 [linux|macos|windows] [arm64|x86_64] [--debug]${NC}"
     echo "  linux: Build for Linux (x86_64)"
-    echo "  macos: Build for macOS (universal)"
+    echo "  macos [arm64|x86_64]: Build for macOS (defaults to host arch)"
     echo "  windows: Build for Windows (x86_64, cross-compile)"
     echo "  --debug: Build debug variant (template_debug) instead of release"
     exit 1
@@ -69,11 +69,22 @@ setup_linux() {
 
 setup_macos() {
     PLATFORM="macos"
-    ARCH="universal"
-    SCONS_FLAGS="platform=macos arch=universal"
-    LIVEKIT_ARCHIVE="livekit-sdk-macos-universal-${LIVEKIT_VERSION}.tar.gz"
+    ARCH="${1:-$(uname -m)}"
+    # Normalize arch name
+    case "$ARCH" in
+        aarch64|arm64) ARCH="arm64" ;;
+        x86_64|amd64)  ARCH="x86_64" ;;
+        *)
+            echo -e "${RED}Unsupported macOS architecture: $ARCH${NC}"
+            exit 1
+            ;;
+    esac
+    SCONS_FLAGS="platform=macos arch=${ARCH}"
+    local sdk_arch="arm64"
+    [ "$ARCH" = "x86_64" ] && sdk_arch="x64"
+    LIVEKIT_ARCHIVE="livekit-sdk-macos-${sdk_arch}-${LIVEKIT_VERSION}.tar.gz"
     LIVEKIT_URL="https://github.com/krazyjakee/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
-    echo -e "${BLUE}=== Godot-LiveKit Local Build Script (macOS) ===${NC}"
+    echo -e "${BLUE}=== Godot-LiveKit Local Build Script (macOS ${ARCH}) ===${NC}"
 }
 
 setup_windows() {
@@ -132,14 +143,7 @@ fetch_godotcpp() {
 
 # Function to download livekit
 fetch_livekit() {
-    if [ "$PLATFORM" == "macos" ] && [ -f "livekit-sdk/lib/liblivekit.dylib" ]; then
-        if lipo -info livekit-sdk/lib/liblivekit.dylib | grep -q "x86_64 arm64"; then
-            echo -e "${GREEN}Detected local universal LiveKit SDK, skipping download.${NC}"
-            return 0
-        fi
-    fi
-
-    echo -e "${YELLOW}Fetching LiveKit C++ SDK for ${PLATFORM}...${NC}"
+    echo -e "${YELLOW}Fetching LiveKit C++ SDK for ${PLATFORM} (${ARCH})...${NC}"
 
     rm -rf livekit-sdk
     mkdir -p livekit-sdk
@@ -178,7 +182,9 @@ fetch_livekit() {
         fi
     fi
 
-    echo "$LIVEKIT_VERSION" > livekit-sdk/.version
+    local version_key="$LIVEKIT_VERSION"
+    [ "$PLATFORM" == "macos" ] && version_key="${LIVEKIT_VERSION}-${ARCH}"
+    echo "$version_key" > livekit-sdk/.version
     echo -e "${GREEN}LiveKit SDK downloaded and extracted successfully!${NC}"
 }
 
@@ -191,7 +197,9 @@ check_frametap_cache() {
         return 1
     fi
 
-    if [ -f "frametap/.version" ] && [ "$(cat frametap/.version)" = "$FRAMETAP_VERSION" ]; then
+    local version_key="$FRAMETAP_VERSION"
+    [ "$PLATFORM" == "macos" ] && version_key="${FRAMETAP_VERSION}-${ARCH}"
+    if [ -f "frametap/.version" ] && [ "$(cat frametap/.version)" = "$version_key" ]; then
         echo -e "${GREEN}frametap cache is valid!${NC}"
         return 0
     fi
@@ -204,7 +212,12 @@ check_frametap_cache() {
 fetch_frametap() {
     echo -e "${YELLOW}Fetching frametap for ${PLATFORM}...${NC}"
 
-    local archive="frametap-${PLATFORM}.zip"
+    local archive
+    if [ "$PLATFORM" == "macos" ]; then
+        archive="frametap-lib-${PLATFORM}-${ARCH}.zip"
+    else
+        archive="frametap-lib-${PLATFORM}.zip"
+    fi
     local url="https://github.com/krazyjakee/frametap/releases/download/v${FRAMETAP_VERSION}/${archive}"
 
     rm -rf frametap
@@ -224,7 +237,9 @@ fetch_frametap() {
     fi
 
     rm "${archive}"
-    echo "$FRAMETAP_VERSION" > frametap/.version
+    local version_key="$FRAMETAP_VERSION"
+    [ "$PLATFORM" == "macos" ] && version_key="${FRAMETAP_VERSION}-${ARCH}"
+    echo "$version_key" > frametap/.version
     echo -e "${GREEN}frametap downloaded and extracted successfully!${NC}"
 }
 
@@ -237,7 +252,9 @@ check_livekit_cache() {
         return 1
     fi
 
-    if [ -f "livekit-sdk/.version" ] && [ "$(cat livekit-sdk/.version)" = "$LIVEKIT_VERSION" ]; then
+    local version_key="$LIVEKIT_VERSION"
+    [ "$PLATFORM" == "macos" ] && version_key="${LIVEKIT_VERSION}-${ARCH}"
+    if [ -f "livekit-sdk/.version" ] && [ "$(cat livekit-sdk/.version)" = "$version_key" ]; then
         echo -e "${GREEN}livekit SDK cache is valid!${NC}"
         return 0
     fi
@@ -323,11 +340,13 @@ build_main_project() {
     elif [ "$PLATFORM" == "windows" ]; then
         cp livekit-sdk/bin/*.dll addons/godot-livekit/bin/ || true
     elif [ "$PLATFORM" == "macos" ]; then
-        cp livekit-sdk/lib/*.dylib addons/godot-livekit/bin/ || true
+        local dep_dir="addons/godot-livekit/bin/macos-${ARCH}"
+        mkdir -p "$dep_dir"
+        cp livekit-sdk/lib/*.dylib "$dep_dir/" || true
 
         # Fix hardcoded absolute paths in dylibs from upstream CI builds
         echo -e "${YELLOW}Fixing dylib install names...${NC}"
-        for dylib in addons/godot-livekit/bin/*.dylib; do
+        for dylib in "$dep_dir"/*.dylib; do
             # Find any absolute path references to liblivekit_ffi.dylib and rewrite to @rpath
             otool -L "$dylib" | grep liblivekit_ffi.dylib | grep -v @rpath | awk '{print $1}' | while read -r bad_path; do
                 echo "  Fixing $dylib: $bad_path -> @rpath/liblivekit_ffi.dylib"
@@ -345,6 +364,7 @@ main() {
     fi
 
     local platform_arg=""
+    local arch_arg=""
     for arg in "$@"; do
         case "$arg" in
             --debug)
@@ -352,6 +372,9 @@ main() {
                 ;;
             linux|macos|windows)
                 platform_arg="$arg"
+                ;;
+            arm64|x86_64)
+                arch_arg="$arg"
                 ;;
             *)
                 show_usage
@@ -368,7 +391,7 @@ main() {
             setup_linux
             ;;
         macos)
-            setup_macos
+            setup_macos "$arch_arg"
             ;;
         windows)
             setup_windows

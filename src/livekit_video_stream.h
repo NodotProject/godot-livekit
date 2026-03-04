@@ -36,6 +36,15 @@ private:
     // Shared sentinel: stays valid even if `this` is freed after detach.
     std::shared_ptr<std::atomic<bool>> alive_ = std::make_shared<std::atomic<bool>>(true);
 
+    // Cached frame buffers — reused across poll() calls to avoid per-frame allocations.
+    Ref<Image> cached_image_;
+    PackedByteArray cached_pba_;
+    int last_width_{0};
+    int last_height_{0};
+
+    // Auto-poll: when true, the poller calls poll() every frame automatically.
+    bool auto_poll_{true};
+
     void _reader_loop();
     void _ensure_reader_started();
 
@@ -52,6 +61,9 @@ public:
     Ref<ImageTexture> get_texture() const;
     bool poll();
     void close();
+
+    void set_auto_poll(bool enabled);
+    bool get_auto_poll() const;
 };
 
 }

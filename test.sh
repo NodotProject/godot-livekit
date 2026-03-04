@@ -49,7 +49,7 @@ if ! command -v timeout &> /dev/null && command -v gtimeout &> /dev/null; then
 fi
 
 # Auto-download GUT if not installed
-GUT_VERSION="v9.3.0"
+GUT_VERSION="v9.5.0"
 if [ ! -d "addons/gut" ]; then
     echo -e "${YELLOW}GUT not found — downloading ${GUT_VERSION}...${NC}"
     GUT_TMP=$(mktemp -d)
@@ -106,6 +106,25 @@ if [ -n "${LIVEKIT_TEST_URL}" ]; then
     }
 else
     echo -e "${BLUE}Skipping integration tests (LIVEKIT_TEST_URL not set)${NC}"
+fi
+
+# Run e2e tests when RUN_E2E is set (tokens generated via devkey in GDScript)
+if [ -n "${RUN_E2E}" ]; then
+    E2E_URL="${LIVEKIT_E2E_URL:-wss://livekit.daccord.gg}"
+    echo -e "${YELLOW}Running e2e tests (server: ${E2E_URL})...${NC}"
+    $TIMEOUT_CMD 60s $GODOT_CMD --headless -s addons/gut/gut_cmdln.gd \
+        -gdir=test/e2e -gexit \
+        -gconfig=res://test/.gutconfig.json || {
+        EXIT_CODE=$?
+        if [ $EXIT_CODE -eq 124 ]; then
+            echo -e "${YELLOW}E2E tests timed out after 60s${NC}"
+        else
+            echo -e "${RED}E2E tests failed with exit code $EXIT_CODE${NC}"
+            exit $EXIT_CODE
+        fi
+    }
+else
+    echo -e "${BLUE}Skipping e2e tests (RUN_E2E not set)${NC}"
 fi
 
 # Run performance tests if they exist

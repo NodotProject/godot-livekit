@@ -76,9 +76,9 @@ func _ready():
     room.data_received.connect(_on_data_received)
     room.connect_to_room("wss://your-server.url", "your-token", {})
 
-func _process(_delta):
-    if room:
-        room.poll_events()
+# No _process() needed — rooms, video streams, and screen captures are
+# auto-polled every frame by default. Set auto_poll = false if you prefer
+# to call poll_events() / poll() manually.
 
 func _on_connected():
     print("Connected as: ", room.get_local_participant().get_identity())
@@ -99,12 +99,12 @@ You can capture screens and windows natively:
 
 ```gdscript
 var capture = LiveKitScreenCapture.create()
+capture.frame_received.connect(_on_frame)
 capture.start()
 
-func _process(_delta):
-    if capture.poll():
-        var image = capture.get_image()
-        # Feed into a LiveKitVideoSource for screen sharing
+func _on_frame():
+    var image = capture.get_image()
+    # Feed into a LiveKitVideoSource for screen sharing
 ```
 
 ## Running Tests

@@ -99,6 +99,9 @@ private:
     // thread lambdas so it remains valid even after `this` is destroyed.
     std::shared_ptr<std::atomic<bool>> alive_ = std::make_shared<std::atomic<bool>>(true);
 
+    // Auto-poll: when true, the poller calls poll_events() every frame.
+    bool auto_poll_{true};
+
     // Thread-safe event queue: callbacks push lambdas from background
     // threads; poll_events() drains and executes them on the main thread.
     std::mutex event_mutex_;
@@ -138,6 +141,9 @@ public:
 #endif
 
     livekit::Room *get_native_room() const { return room.get(); }
+
+    void set_auto_poll(bool enabled);
+    bool get_auto_poll() const;
 };
 
 }

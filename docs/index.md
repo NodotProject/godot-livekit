@@ -14,6 +14,7 @@ This GDExtension provides real-time audio, video, and data functionality in Godo
 - Secure media with end-to-end encryption (E2EE) and key management
 - Access detailed WebRTC connection statistics per track
 - Capture audio from Godot's audio system and video from Godot Images
+- Automatic per-frame polling — no `_process()` boilerplate needed for rooms, video streams, or screen captures
 
 ## Getting Started
 

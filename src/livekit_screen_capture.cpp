@@ -1,4 +1,5 @@
 #include "livekit_screen_capture.h"
+#include "livekit_poller.h"
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -33,6 +34,11 @@ void LiveKitScreenCapture::_bind_methods() {
     // Cleanup
     ClassDB::bind_method(D_METHOD("close"), &LiveKitScreenCapture::close);
 
+    // Auto-poll
+    ClassDB::bind_method(D_METHOD("set_auto_poll", "enabled"), &LiveKitScreenCapture::set_auto_poll);
+    ClassDB::bind_method(D_METHOD("get_auto_poll"), &LiveKitScreenCapture::get_auto_poll);
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_poll"), "set_auto_poll", "get_auto_poll");
+
     // Signal
     ADD_SIGNAL(MethodInfo("frame_received"));
 
@@ -46,6 +52,8 @@ LiveKitScreenCapture::LiveKitScreenCapture() {
 }
 
 LiveKitScreenCapture::~LiveKitScreenCapture() {
+    LiveKitPoller::instance().unregister_screen_capture(this);
+    alive_->store(false);
     close();
 }
 
@@ -125,6 +133,7 @@ Ref<LiveKitScreenCapture> LiveKitScreenCapture::create() {
         capture.instantiate();
         capture->tap_ = std::make_unique<frametap::FrameTap>();
         capture->texture_.instantiate();
+        LiveKitPoller::instance().register_screen_capture(capture.ptr(), capture->alive_);
         return capture;
     } catch (const frametap::CaptureError &e) {
         UtilityFunctions::push_error("LiveKitScreenCapture::create: ", e.what());
@@ -154,6 +163,7 @@ Ref<LiveKitScreenCapture> LiveKitScreenCapture::create_for_monitor(const Diction
         capture.instantiate();
         capture->tap_ = std::make_unique<frametap::FrameTap>(monitor);
         capture->texture_.instantiate();
+        LiveKitPoller::instance().register_screen_capture(capture.ptr(), capture->alive_);
         return capture;
     } catch (const frametap::CaptureError &e) {
         UtilityFunctions::push_error("LiveKitScreenCapture::create_for_monitor: ", e.what());
@@ -182,6 +192,7 @@ Ref<LiveKitScreenCapture> LiveKitScreenCapture::create_for_window(const Dictiona
         capture.instantiate();
         capture->tap_ = std::make_unique<frametap::FrameTap>(window);
         capture->texture_.instantiate();
+        LiveKitPoller::instance().register_screen_capture(capture.ptr(), capture->alive_);
         return capture;
     } catch (const frametap::CaptureError &e) {
         UtilityFunctions::push_error("LiveKitScreenCapture::create_for_window: ", e.what());
@@ -288,20 +299,32 @@ bool LiveKitScreenCapture::poll() {
         return false;
     }
 
-    PackedByteArray pba;
-    pba.resize(frame.data.size());
-    memcpy(pba.ptrw(), frame.data.data(), frame.data.size());
+    int width = (int)frame.width;
+    int height = (int)frame.height;
 
-    Ref<Image> image = Image::create_from_data(
-        (int)frame.width, (int)frame.height, false, Image::FORMAT_RGBA8, pba);
-    if (image.is_null()) {
-        return false;
-    }
+    if (frame.width == last_width_ && frame.height == last_height_ && latest_image_.is_valid()) {
+        // Fast path: reuse existing buffers — no allocation.
+        memcpy(cached_pba_.ptrw(), frame.data.data(), frame.data.size());
+        latest_image_->set_data(width, height, false, Image::FORMAT_RGBA8, cached_pba_);
+        if (texture_.is_valid()) {
+            texture_->update(latest_image_);
+        }
+    } else {
+        // Slow path: resolution changed or first frame — allocate.
+        cached_pba_.resize(frame.data.size());
+        memcpy(cached_pba_.ptrw(), frame.data.data(), frame.data.size());
 
-    latest_image_ = image;
+        latest_image_ = Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, cached_pba_);
+        if (latest_image_.is_null()) {
+            return false;
+        }
 
-    if (texture_.is_valid()) {
-        texture_->set_image(image);
+        if (texture_.is_valid()) {
+            texture_->set_image(latest_image_);
+        }
+
+        last_width_ = frame.width;
+        last_height_ = frame.height;
     }
 
     emit_signal("frame_received");
@@ -347,4 +370,20 @@ Ref<Image> LiveKitScreenCapture::screenshot() {
 void LiveKitScreenCapture::close() {
     stop();
     tap_.reset();
+}
+
+void LiveKitScreenCapture::set_auto_poll(bool enabled) {
+    if (auto_poll_ == enabled) {
+        return;
+    }
+    auto_poll_ = enabled;
+    if (enabled) {
+        LiveKitPoller::instance().register_screen_capture(this, alive_);
+    } else {
+        LiveKitPoller::instance().unregister_screen_capture(this);
+    }
+}
+
+bool LiveKitScreenCapture::get_auto_poll() const {
+    return auto_poll_;
 }

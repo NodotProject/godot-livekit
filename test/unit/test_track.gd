@@ -60,6 +60,7 @@ func test_unbound_track_request_stats_no_crash():
 	# Should not crash — null guard returns early
 	t.request_stats()
 	assert_true(true, "request_stats on unbound track should not crash")
+	assert_push_error("not bound")
 
 
 func test_local_audio_track_inheritance():
@@ -107,3 +108,4 @@ func test_local_video_track_mute_unmute_unbound():
 func test_create_local_audio_track_null_source():
 	var t = LiveKitLocalAudioTrack.create("test", null)
 	assert_null(t, "create with null source should return null")
+	assert_push_error("source is null")

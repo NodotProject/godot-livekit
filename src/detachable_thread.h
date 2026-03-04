@@ -10,15 +10,17 @@
 #include <thread>
 #include <utility>
 
+#include "thread_pool.h"
+
 // Move-only wrapper around std::thread that tracks completion via a
 // shared state.  The state is a shared_ptr so it remains valid even
 // after the DetachableThread instance is destroyed (when a stuck
-// thread is detached during shutdown).
+// thread is moved to the zombie pool during shutdown).
 class DetachableThread {
 	struct State {
 		mutable std::mutex mutex;
 		std::condition_variable cv;
-		bool done = false;
+		std::shared_ptr<std::atomic<bool>> done = std::make_shared<std::atomic<bool>>(false);
 	};
 
 	std::thread thread_;
@@ -39,14 +41,14 @@ public:
 			f();
 			{
 				std::lock_guard<std::mutex> lock(state->mutex);
-				state->done = true;
+				state->done->store(true);
 			}
 			state->cv.notify_all();
 		});
 	}
 
 	// Wait up to timeout_ms using a condition variable, then join if
-	// done or detach if the thread is still stuck.
+	// done or move to the zombie pool if the thread is still stuck.
 	void join_or_detach(int timeout_ms = 2000) {
 		if (!thread_.joinable()) {
 			return;
@@ -54,19 +56,23 @@ public:
 		{
 			std::unique_lock<std::mutex> lock(state_->mutex);
 			state_->cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this]() {
-				return state_->done;
+				return state_->done->load();
 			});
 		}
-		if (state_->done) {
+		if (state_->done->load()) {
 			thread_.join();
 		} else {
-			thread_.detach();
+			// Move to zombie pool instead of bare detach — the pool will
+			// attempt a clean join at shutdown.
+			ZombieThreadPool::Entry entry;
+			entry.thread = std::move(thread_);
+			entry.done = state_->done;
+			ZombieThreadPool::instance().add(std::move(entry));
 		}
 	}
 
 	bool finished() const {
-		std::lock_guard<std::mutex> lock(state_->mutex);
-		return state_->done;
+		return state_->done->load();
 	}
 	bool joinable() const { return thread_.joinable(); }
 	void join() { thread_.join(); }

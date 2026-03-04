@@ -8,6 +8,8 @@
 #include "livekit_video_source.h"
 #include "livekit_audio_source.h"
 #include "livekit_screen_capture.h"
+#include "livekit_poller.h"
+#include "thread_pool.h"
 #ifdef LIVEKIT_E2EE_SUPPORTED
 #include "livekit_e2ee.h"
 #endif
@@ -19,6 +21,10 @@
 #include <livekit/livekit.h>
 
 using namespace godot;
+
+static void livekit_frame_callback() {
+    LiveKitPoller::instance().poll_all();
+}
 
 void initialize_livekit_module(ModuleInitializationLevel p_level) {
     if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
@@ -72,6 +78,9 @@ void uninitialize_livekit_module(ModuleInitializationLevel p_level) {
         return;
     }
 
+    // Drain zombie threads before shutting down the LiveKit SDK.
+    ZombieThreadPool::instance().join_all(3000);
+
     livekit::shutdown();
 }
 
@@ -82,6 +91,7 @@ GDExtensionBool GDE_EXPORT livekit_library_init(GDExtensionInterfaceGetProcAddre
     init_obj.register_initializer(initialize_livekit_module);
     init_obj.register_terminator(uninitialize_livekit_module);
     init_obj.set_minimum_library_initialization_level(MODULE_INITIALIZATION_LEVEL_SCENE);
+    init_obj.register_frame_callback(livekit_frame_callback);
 
     return init_obj.init();
 }

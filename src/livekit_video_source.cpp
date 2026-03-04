@@ -18,6 +18,12 @@ LiveKitVideoSource::LiveKitVideoSource() {
 }
 
 LiveKitVideoSource::~LiveKitVideoSource() {
+    // Signal the capture thread to stop and wait for it.
+    running_.store(false);
+    frame_cv_.notify_all();
+    if (capture_thread_.joinable()) {
+        capture_thread_.join();
+    }
 }
 
 Ref<LiveKitVideoSource> LiveKitVideoSource::create(int width, int height) {
@@ -28,6 +34,11 @@ Ref<LiveKitVideoSource> LiveKitVideoSource::create(int width, int height) {
     source->source_ = native_source;
     source->width_ = width;
     source->height_ = height;
+
+    // Start the background capture thread.
+    source->running_.store(true);
+    source->capture_thread_ = std::thread(&LiveKitVideoSource::capture_loop, source.ptr());
+
     return source;
 }
 
@@ -48,9 +59,6 @@ void LiveKitVideoSource::capture_frame(const Ref<Image> &image, int64_t timestam
     int h = rgba_image->get_height();
     PackedByteArray data = rgba_image->get_data();
 
-    std::vector<uint8_t> frame_data(data.ptr(), data.ptr() + data.size());
-    livekit::VideoFrame frame(w, h, livekit::VideoBufferType::RGBA, std::move(frame_data));
-
     livekit::VideoRotation rot = livekit::VideoRotation::VIDEO_ROTATION_0;
     switch (rotation) {
         case 90: rot = livekit::VideoRotation::VIDEO_ROTATION_90; break;
@@ -58,7 +66,50 @@ void LiveKitVideoSource::capture_frame(const Ref<Image> &image, int64_t timestam
         case 270: rot = livekit::VideoRotation::VIDEO_ROTATION_270; break;
     }
 
-    source_->captureFrame(frame, timestamp_us, rot);
+    // Copy pixel data into the pending slot (replaces any stale frame).
+    {
+        std::lock_guard<std::mutex> lock(frame_mutex_);
+        pending_frame_.data.assign(data.ptr(), data.ptr() + data.size());
+        pending_frame_.width = w;
+        pending_frame_.height = h;
+        pending_frame_.timestamp_us = timestamp_us;
+        pending_frame_.rotation = rot;
+        pending_frame_.valid = true;
+    }
+    frame_cv_.notify_one();
+}
+
+void LiveKitVideoSource::capture_loop() {
+    while (running_.load()) {
+        PendingFrame frame;
+
+        // Wait for a pending frame or shutdown signal.
+        {
+            std::unique_lock<std::mutex> lock(frame_mutex_);
+            frame_cv_.wait(lock, [this]() {
+                return pending_frame_.valid || !running_.load();
+            });
+            if (!running_.load()) {
+                break;
+            }
+            // Move the frame out of the pending slot.
+            frame = std::move(pending_frame_);
+            pending_frame_.valid = false;
+            pending_frame_.data.clear();
+        }
+
+        if (!frame.valid || frame.data.empty() || !source_) {
+            continue;
+        }
+
+        // This call may block (SDK encoder backpressure) — that's fine,
+        // we're on a background thread.  The main thread stays responsive
+        // and can overwrite pending_frame_ with newer data.
+        livekit::VideoFrame vf(frame.width, frame.height,
+                               livekit::VideoBufferType::RGBA,
+                               std::move(frame.data));
+        source_->captureFrame(vf, frame.timestamp_us, frame.rotation);
+    }
 }
 
 int LiveKitVideoSource::get_width() const {

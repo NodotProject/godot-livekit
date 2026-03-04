@@ -1,6 +1,8 @@
 #include "livekit_room.h"
 #include "livekit_track.h"
 #include "livekit_track_publication.h"
+#include "livekit_poller.h"
+#include "thread_pool.h"
 #ifdef LIVEKIT_E2EE_SUPPORTED
 #include "livekit_e2ee.h"
 #endif
@@ -39,6 +41,10 @@ void LiveKitRoom::_bind_methods() {
     ADD_PROPERTY(PropertyInfo(Variant::STRING, "name"), "", "get_name");
     ADD_PROPERTY(PropertyInfo(Variant::STRING, "metadata"), "", "get_metadata");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "connection_state"), "", "get_connection_state");
+
+    ClassDB::bind_method(D_METHOD("set_auto_poll", "enabled"), &LiveKitRoom::set_auto_poll);
+    ClassDB::bind_method(D_METHOD("get_auto_poll"), &LiveKitRoom::get_auto_poll);
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_poll"), "set_auto_poll", "get_auto_poll");
 
     // Connection signals
     ADD_SIGNAL(MethodInfo("connected"));
@@ -129,9 +135,12 @@ LiveKitRoom::LiveKitRoom() {
     room = std::make_unique<livekit::Room>();
     delegate = std::make_unique<GodotRoomDelegate>(this);
     room->setDelegate(delegate.get());
+    LiveKitPoller::instance().register_room(this, alive_);
 }
 
 LiveKitRoom::~LiveKitRoom() {
+    LiveKitPoller::instance().unregister_room(this);
+
     // Tell any detached connect thread not to touch `this` after Connect()
     // returns (event_mutex_, pending_events_ will be destroyed).
     alive_->store(false);
@@ -152,11 +161,28 @@ LiveKitRoom::~LiveKitRoom() {
 
     // Join disconnect first (it waits on the old connect thread internally).
     disconnect_thread_.join_or_detach(5000);
-    // Then the current connect thread (in case disconnect was never started).
-    connect_thread_.join_or_detach(5000);
 
-    room.reset();
-    delegate.reset();
+    // If the connect thread finished, join it and destroy the Room normally.
+    // If it's still running (Connect() stuck), move the native Room into a
+    // detached cleanup thread so it stays alive until Connect() returns —
+    // destroying the Room while Connect() is in progress is use-after-free.
+    if (connect_thread_.joinable() && !connect_thread_.finished()) {
+        auto orphan_room = std::move(room);
+        auto orphan_delegate = std::move(delegate);
+        std::thread ct = connect_thread_.release();
+        auto done_flag = std::make_shared<std::atomic<bool>>(false);
+        ZombieThreadPool::Entry entry;
+        entry.done = done_flag;
+        entry.thread = std::thread([r = std::move(orphan_room), d = std::move(orphan_delegate), t = std::move(ct), done_flag]() mutable {
+            if (t.joinable()) t.join();
+            done_flag->store(true);
+        });
+        ZombieThreadPool::instance().add(std::move(entry));
+    } else {
+        connect_thread_.join_or_detach(5000);
+        room.reset();
+        delegate.reset();
+    }
 }
 
 bool LiveKitRoom::connect_to_room(const String &url, const String &token, const Dictionary &options) {
@@ -178,14 +204,53 @@ bool LiveKitRoom::connect_to_room(const String &url, const String &token, const 
     }
 #endif
 
-    // Wait for any previous connect thread (non-blocking with timeout to
-    // avoid stalling the main thread if the SDK is stuck).
-    connect_thread_.join_or_detach(2000);
-    // Previous disconnect thread never dereferences `this`; safe to detach.
+    // --- Clean up previous connection state ---
+
+    // Discard pending events from any prior connection.
+    {
+        std::lock_guard<std::mutex> lock(event_mutex_);
+        pending_events_.clear();
+    }
+
+    // Clear participant state from the old connection.
+    local_participant.unref();
+    {
+        std::lock_guard<std::mutex> plock(participants_mutex_);
+        remote_participants.clear();
+    }
+#ifdef LIVEKIT_E2EE_SUPPORTED
+    e2ee_manager_.unref();
+#endif
+
+    // Null delegate on old room, then move old room + old connect thread
+    // into a background cleanup thread (same swap pattern as disconnect).
+    auto old_room = std::move(room);
+    auto old_delegate = std::move(delegate);
+    if (old_room) {
+        old_room->setDelegate(nullptr);
+    }
+
+    // Previous disconnect thread only touches its captured old_room /
+    // old_delegate — never `this`.  Safe to detach if still running.
     if (disconnect_thread_.joinable()) {
         disconnect_thread_.detach();
     }
 
+    // Move the old connect thread out so the cleanup lambda can join it.
+    std::thread old_ct = connect_thread_.release();
+
+    // Background the old room destruction (may block waiting for Connect()).
+    disconnect_thread_.start([old_room = std::move(old_room), old_delegate = std::move(old_delegate), old_ct = std::move(old_ct)]() mutable {
+        if (old_ct.joinable()) {
+            old_ct.join();
+        }
+        // unique_ptrs destroyed at end of scope.
+    });
+
+    // --- Create a fresh native Room ---
+    room = std::make_unique<livekit::Room>();
+    delegate = std::make_unique<GodotRoomDelegate>(this);
+    room->setDelegate(delegate.get());
 
     // Suppress the delegate's "connected" signal during async connect;
     // _finalize_connection will emit it after participant init.
@@ -199,10 +264,11 @@ bool LiveKitRoom::connect_to_room(const String &url, const String &token, const 
     // Run the blocking Connect() on a background thread so the main
     // thread (and Godot's rendering/input loop) stays responsive.
     auto alive = alive_;
-    connect_thread_.start([this, alive, url_str, token_str, room_options]() {
+    livekit::Room *room_ptr = room.get();
+    connect_thread_.start([this, alive, room_ptr, url_str, token_str, room_options]() {
         bool success = false;
         try {
-            success = room->Connect(url_str.c_str(), token_str.c_str(), room_options);
+            success = room_ptr->Connect(url_str.c_str(), token_str.c_str(), room_options);
         } catch (const std::exception &e) {
             UtilityFunctions::push_error("LiveKitRoom::connect_to_room: connection failed: ", String(e.what()));
         } catch (...) {
@@ -288,6 +354,9 @@ void LiveKitRoom::poll_events() {
             emit_signal("connection_failed",
                 String("connection timed out after %s seconds")
                     .replace("%s", String::num(connect_timeout_sec_, 1)));
+            // Swap to a fresh Room so the stuck Connect() thread can't
+            // produce a ghost connection on the old native Room.
+            disconnect_from_room();
             return;
         }
     }
@@ -368,6 +437,8 @@ Dictionary LiveKitRoom::get_remote_participants() const {
 }
 
 String LiveKitRoom::get_sid() const {
+    if (connecting_async_.load() || connection_state.load() != STATE_CONNECTED)
+        return String();
     if (room) {
         auto info = room->room_info();
         if (info.sid.has_value()) {
@@ -378,6 +449,8 @@ String LiveKitRoom::get_sid() const {
 }
 
 String LiveKitRoom::get_name() const {
+    if (connecting_async_.load() || connection_state.load() != STATE_CONNECTED)
+        return String();
     if (room) {
         auto info = room->room_info();
         return String(info.name.c_str());
@@ -386,6 +459,8 @@ String LiveKitRoom::get_name() const {
 }
 
 String LiveKitRoom::get_metadata() const {
+    if (connecting_async_.load() || connection_state.load() != STATE_CONNECTED)
+        return String();
     if (room) {
         auto info = room->room_info();
         return String(info.metadata.c_str());
@@ -395,6 +470,22 @@ String LiveKitRoom::get_metadata() const {
 
 int LiveKitRoom::get_connection_state() const {
     return connection_state.load();
+}
+
+void LiveKitRoom::set_auto_poll(bool enabled) {
+    if (auto_poll_ == enabled) {
+        return;
+    }
+    auto_poll_ = enabled;
+    if (enabled) {
+        LiveKitPoller::instance().register_room(this, alive_);
+    } else {
+        LiveKitPoller::instance().unregister_room(this);
+    }
+}
+
+bool LiveKitRoom::get_auto_poll() const {
+    return auto_poll_;
 }
 
 #ifdef LIVEKIT_E2EE_SUPPORTED

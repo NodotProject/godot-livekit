@@ -20,6 +20,7 @@ void LiveKitAudioStream::_bind_methods() {
 }
 
 LiveKitAudioStream::LiveKitAudioStream() {
+    ring_.resize(kMaxAudioBufferSamples, 0.0f);
 }
 
 LiveKitAudioStream::~LiveKitAudioStream() {
@@ -31,6 +32,7 @@ void LiveKitAudioStream::_reader_loop() {
     // Capture a local copy so the native stream stays alive even if
     // close() calls stream_.reset() on another thread.
     auto stream = stream_;
+    if (!stream) return;
     auto alive = alive_;
     while (running_.load() && alive->load()) {
         livekit::AudioFrameEvent event;
@@ -50,24 +52,27 @@ void LiveKitAudioStream::_reader_loop() {
         sample_rate_ = frame.sample_rate();
         num_channels_ = channels;
 
-        // Convert int16 interleaved PCM to float32
-        std::vector<float> float_samples(pcm_data.size());
-        for (size_t i = 0; i < pcm_data.size(); i++) {
-            float_samples[i] = pcm_data[i] / 32768.0f;
+        // Convert int16 interleaved PCM to float32 using persistent buffer.
+        size_t sample_count = pcm_data.size();
+        reader_float_samples_.resize(sample_count);
+        for (size_t i = 0; i < sample_count; i++) {
+            reader_float_samples_[i] = pcm_data[i] / 32768.0f;
         }
 
         {
             std::lock_guard<std::mutex> lock(audio_mutex_);
-            // Cap buffer to prevent unbounded growth when poll() isn't called.
-            if (audio_buffer_.size() + float_samples.size() > kMaxAudioBufferSamples) {
-                size_t excess = (audio_buffer_.size() + float_samples.size()) - kMaxAudioBufferSamples;
-                if (excess >= audio_buffer_.size()) {
-                    audio_buffer_.clear();
+            // Write sample-by-sample into ring buffer.
+            // If full, overwrite oldest samples (advance head).
+            for (size_t i = 0; i < sample_count; i++) {
+                ring_[ring_tail_] = reader_float_samples_[i];
+                ring_tail_ = (ring_tail_ + 1) % kMaxAudioBufferSamples;
+                if (ring_count_ == kMaxAudioBufferSamples) {
+                    // Overwrite oldest — advance head.
+                    ring_head_ = (ring_head_ + 1) % kMaxAudioBufferSamples;
                 } else {
-                    audio_buffer_.erase(audio_buffer_.begin(), audio_buffer_.begin() + excess);
+                    ring_count_++;
                 }
             }
-            audio_buffer_.insert(audio_buffer_.end(), float_samples.begin(), float_samples.end());
         }
     }
 }
@@ -151,11 +156,17 @@ int LiveKitAudioStream::poll(const Ref<AudioStreamGeneratorPlayback> &playback) 
             }
             return 0;
         }
-        buffer.swap(audio_buffer_);
-    }
-
-    if (buffer.empty()) {
-        return 0;
+        if (ring_count_ == 0) {
+            return 0;
+        }
+        // Drain ring buffer into local buffer.
+        buffer.resize(ring_count_);
+        for (size_t i = 0; i < ring_count_; i++) {
+            buffer[i] = ring_[(ring_head_ + i) % kMaxAudioBufferSamples];
+        }
+        ring_head_ = 0;
+        ring_tail_ = 0;
+        ring_count_ = 0;
     }
 
     int channels = num_channels_.load();

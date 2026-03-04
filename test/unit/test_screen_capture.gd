@@ -115,6 +115,27 @@ func test_start_uninitialized_no_crash():
 	assert_push_error("not initialized")
 
 
+func test_auto_poll_default_true():
+	var capture := LiveKitScreenCapture.new()
+	assert_true(capture.get_auto_poll(),
+		"auto_poll should default to true")
+
+
+func test_auto_poll_set_false():
+	var capture := LiveKitScreenCapture.new()
+	capture.set_auto_poll(false)
+	assert_false(capture.get_auto_poll(),
+		"auto_poll should be false after set_auto_poll(false)")
+
+
+func test_auto_poll_set_true_again():
+	var capture := LiveKitScreenCapture.new()
+	capture.set_auto_poll(false)
+	capture.set_auto_poll(true)
+	assert_true(capture.get_auto_poll(),
+		"auto_poll should be true after re-enabling")
+
+
 # --- Display-dependent tests (guarded for CI) ---
 
 func test_create_with_display():

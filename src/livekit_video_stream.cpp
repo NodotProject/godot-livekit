@@ -1,4 +1,5 @@
 #include "livekit_video_stream.h"
+#include "livekit_poller.h"
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -12,6 +13,10 @@ void LiveKitVideoStream::_bind_methods() {
     ClassDB::bind_method(D_METHOD("poll"), &LiveKitVideoStream::poll);
     ClassDB::bind_method(D_METHOD("close"), &LiveKitVideoStream::close);
 
+    ClassDB::bind_method(D_METHOD("set_auto_poll", "enabled"), &LiveKitVideoStream::set_auto_poll);
+    ClassDB::bind_method(D_METHOD("get_auto_poll"), &LiveKitVideoStream::get_auto_poll);
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_poll"), "set_auto_poll", "get_auto_poll");
+
     ADD_SIGNAL(MethodInfo("frame_received"));
 }
 
@@ -19,6 +24,7 @@ LiveKitVideoStream::LiveKitVideoStream() {
 }
 
 LiveKitVideoStream::~LiveKitVideoStream() {
+    LiveKitPoller::instance().unregister_video_stream(this);
     alive_->store(false);
     close();
 }
@@ -27,6 +33,7 @@ void LiveKitVideoStream::_reader_loop() {
     // Capture a local copy so the native stream stays alive even if
     // close() calls stream_.reset() on another thread.
     auto stream = stream_;
+    if (!stream) return;
     auto alive = alive_;
     while (running_.load() && alive->load()) {
         livekit::VideoFrameEvent event;
@@ -64,6 +71,8 @@ Ref<LiveKitVideoStream> LiveKitVideoStream::from_track(const Ref<LiveKitTrack> &
     stream->stream_ = native_stream;
     stream->texture_.instantiate();
 
+    LiveKitPoller::instance().register_video_stream(stream.ptr(), stream->alive_);
+
     return stream;
 }
 
@@ -90,6 +99,8 @@ Ref<LiveKitVideoStream> LiveKitVideoStream::from_participant(const Ref<LiveKitRe
     stream->stream_ = native_stream;
     stream->texture_.instantiate();
 
+    LiveKitPoller::instance().register_video_stream(stream.ptr(), stream->alive_);
+
     return stream;
 }
 
@@ -109,6 +120,9 @@ void LiveKitVideoStream::_ensure_reader_started() {
 }
 
 bool LiveKitVideoStream::poll() {
+    if (!stream_) {
+        return false;
+    }
     _ensure_reader_started();
 
     std::unique_ptr<livekit::VideoFrame> frame;
@@ -132,17 +146,29 @@ bool LiveKitVideoStream::poll() {
     int height = frame->height();
     size_t data_size = frame->dataSize();
 
-    PackedByteArray pba;
-    pba.resize(data_size);
-    memcpy(pba.ptrw(), frame->data(), data_size);
+    if (width == last_width_ && height == last_height_ && cached_image_.is_valid()) {
+        // Fast path: reuse existing buffers — no allocation.
+        memcpy(cached_pba_.ptrw(), frame->data(), data_size);
+        cached_image_->set_data(width, height, false, Image::FORMAT_RGBA8, cached_pba_);
+        if (texture_.is_valid()) {
+            texture_->update(cached_image_);
+        }
+    } else {
+        // Slow path: resolution changed or first frame — allocate.
+        cached_pba_.resize(data_size);
+        memcpy(cached_pba_.ptrw(), frame->data(), data_size);
 
-    Ref<Image> image = Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, pba);
-    if (image.is_null()) {
-        return false;
-    }
+        cached_image_ = Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, cached_pba_);
+        if (cached_image_.is_null()) {
+            return false;
+        }
 
-    if (texture_.is_valid()) {
-        texture_->set_image(image);
+        if (texture_.is_valid()) {
+            texture_->set_image(cached_image_);
+        }
+
+        last_width_ = width;
+        last_height_ = height;
     }
 
     emit_signal("frame_received");
@@ -157,4 +183,20 @@ void LiveKitVideoStream::close() {
     reader_thread_.join_or_detach(2000);
     stream_.reset();
     thread_started_.store(false);
+}
+
+void LiveKitVideoStream::set_auto_poll(bool enabled) {
+    if (auto_poll_ == enabled) {
+        return;
+    }
+    auto_poll_ = enabled;
+    if (enabled) {
+        LiveKitPoller::instance().register_video_stream(this, alive_);
+    } else {
+        LiveKitPoller::instance().unregister_video_stream(this);
+    }
+}
+
+bool LiveKitVideoStream::get_auto_poll() const {
+    return auto_poll_;
 }

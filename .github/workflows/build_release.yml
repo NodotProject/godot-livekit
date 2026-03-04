@@ -27,8 +27,13 @@ jobs:
             os-name: Windows
             platform: windows
           - os: macos-latest
-            os-name: macOS
+            os-name: macOS (arm64)
             platform: macos
+            arch: arm64
+          - os: macos-13
+            os-name: macOS (x86_64)
+            platform: macos
+            arch: x86_64
     
     steps:
       - name: Checkout repository
@@ -53,11 +58,11 @@ jobs:
         with:
           path: |
             godot-cpp
-          key: deps-${{ matrix.platform }}-${{ hashFiles('build.sh') }}
+          key: deps-${{ matrix.platform }}-${{ matrix.arch || matrix.platform }}-${{ hashFiles('build.sh') }}
 
       - name: Build GDExtension
         shell: bash
-        run: ./build.sh ${{ matrix.platform }}
+        run: ./build.sh ${{ matrix.platform }} ${{ matrix.arch || '' }}
 
       - name: Package addon
         shell: bash
@@ -68,7 +73,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: godot-livekit-${{ matrix.platform }}
+          name: godot-livekit-${{ matrix.platform }}-${{ matrix.arch || matrix.platform }}
           path: package/
 
   release:
@@ -85,12 +90,12 @@ jobs:
       - name: Combine builds
         run: |
           mkdir -p release_package/addons/godot-livekit/bin
-          
+
           # Copy each platform's artifact contents to merge them
-          for platform in linux windows macos; do
-            cp -r artifacts/godot-livekit-$platform/addons/godot-livekit/* release_package/addons/godot-livekit/
+          for dir in artifacts/godot-livekit-*/; do
+            cp -r "$dir"/addons/godot-livekit/* release_package/addons/godot-livekit/
           done
-          
+
           cd release_package
           zip -r ../godot-livekit-release.zip .
 

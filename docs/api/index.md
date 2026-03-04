@@ -16,11 +16,14 @@ Represents a LiveKit room. Handles connecting, disconnecting, and room-level sig
 *   `name: String` (read-only): The room's name.
 *   `metadata: String` (read-only): The room's metadata.
 *   `connection_state: int` (read-only): The current connection state (see `ConnectionState` enum).
+*   `auto_poll: bool` (default `true`): When `true`, the built-in frame-level poller automatically calls `poll_events()` every frame — no `_process()` code needed. Set to `false` if you prefer to call `poll_events()` manually.
 
 **Methods:**
 *   `connect_to_room(url: String, token: String, options: Dictionary) -> bool`: Starts connecting to a LiveKit server using the provided WebSocket URL and access token. The connection runs on a background thread and never blocks the main thread — always returns `true` to indicate the connection attempt was started. The actual result arrives via the `connected` or `connection_failed` signals. Options: `auto_subscribe` (default `true`), `dynacast` (default `false`), `auto_reconnect` (default `true`), `connect_timeout` (default `15.0` seconds, `0` to disable), `e2ee` (a `LiveKitE2eeOptions`).
 *   `disconnect_from_room()`: Disconnects from the current room. This is always non-blocking — background threads are given a short grace period and then detached if still running.
-*   `poll_events()`: Drains the event queue and emits any pending signals. Call this in `_process()` to receive room signals. Also checks `connect_timeout` and emits `connection_failed` if the timeout has elapsed.
+*   `poll_events()`: Drains the event queue and emits any pending signals. Called automatically every frame when `auto_poll` is `true` (the default). If `auto_poll` is `false`, call this manually in `_process()`. Also checks `connect_timeout` and emits `connection_failed` if the timeout has elapsed.
+*   `set_auto_poll(enabled: bool)`: Enables or disables automatic per-frame polling.
+*   `get_auto_poll() -> bool`: Returns whether automatic polling is enabled.
 *   `get_local_participant() -> LiveKitLocalParticipant`: Returns the local participant object.
 *   `get_remote_participants() -> Dictionary`: Returns a dictionary of remote participants, keyed by their identity.
 *   `get_sid() -> String`: Returns the room's unique Session ID.
@@ -89,11 +92,11 @@ Represents the local user. Handles publishing tracks, data, and RPC.
 *   `publish_track(track: LiveKitTrack, options: Dictionary) -> LiveKitLocalTrackPublication`: Publishes a local track to the room.
 *   `unpublish_track(track_sid: String)`: Unpublishes a track by its SID.
 *   `perform_rpc(destination: String, method: String, payload: String, timeout: float)`: Performs an asynchronous remote procedure call to another participant. The result is delivered via the `rpc_response_received` signal; errors via the `rpc_error` signal.
-*   `register_rpc_method(method: String)`: Registers a method name to receive RPC calls. The registered handler is invoked synchronously by the SDK — return a value from the handler callback to respond. Async responses are not yet supported.
+*   `register_rpc_method(method: String)`: Registers a method name to receive RPC calls.
 *   `unregister_rpc_method(method: String)`: Unregisters an RPC method.
 
 **Signals:**
-*   `rpc_method_invoked(method: String, request_id: String, caller_identity: String, payload: String, response_timeout: float)`: Emitted when an RPC method is invoked by a remote participant. Note: async responses via `respond_to_rpc()` are not yet supported by the underlying SDK. The handler returns `nullopt` (treated as an application error by the caller).
+*   `rpc_method_invoked(method: String, request_id: String, caller_identity: String, payload: String, response_timeout: float)`: Emitted when an RPC method is invoked by a remote participant.
 *   `rpc_response_received(method: String, result: String)`: Emitted when an outgoing RPC call succeeds. Contains the method name and the response payload.
 *   `rpc_error(method: String, error_message: String)`: Emitted when an outgoing RPC call fails.
 
@@ -215,17 +218,22 @@ Source for creating local video tracks. Allows capturing video frames from Godot
 ### `LiveKitVideoStream`
 Receives video frames from a remote video track and provides them as an `ImageTexture`.
 
+**Properties:**
+*   `auto_poll: bool` (default `true`): When `true`, the built-in frame-level poller automatically calls `poll()` every frame. Set to `false` to poll manually.
+
 **Static Methods:**
 *   `from_track(track: LiveKitTrack) -> LiveKitVideoStream`: Creates a video stream from a track.
 *   `from_participant(participant: LiveKitRemoteParticipant, source: int) -> LiveKitVideoStream`: Creates a video stream from a participant's track source.
 
 **Methods:**
 *   `get_texture() -> ImageTexture`: Returns the texture containing the latest video frame.
-*   `poll() -> bool`: Polls for new frames and updates the texture. Call this in `_process()`. Returns `true` if a new frame was received.
+*   `poll() -> bool`: Polls for new frames and updates the texture. Called automatically when `auto_poll` is `true`. Returns `true` if a new frame was received.
 *   `close()`: Closes the video stream and stops receiving frames.
+*   `set_auto_poll(enabled: bool)`: Enables or disables automatic per-frame polling.
+*   `get_auto_poll() -> bool`: Returns whether automatic polling is enabled.
 
 **Signals:**
-*   `frame_received`: Emitted when a new video frame is available.
+*   `frame_received`: Emitted when a new video frame is available. **Avoid connecting heavy per-frame work** to this signal — prefer polling in `_process()` instead.
 
 ### `LiveKitAudioStream`
 Receives audio frames from a remote audio track and pipes them into Godot's audio system.
@@ -247,6 +255,9 @@ Receives audio frames from a remote audio track and pipes them into Godot's audi
 ### `LiveKitScreenCapture`
 Captures screen content from monitors or individual windows using the native [frametap](https://github.com/krazyjakee/frametap) library. Frames are delivered as `ImageTexture` / `Image` objects that can be fed into a `LiveKitVideoSource` for publishing.
 
+**Properties:**
+*   `auto_poll: bool` (default `true`): When `true`, the built-in frame-level poller automatically calls `poll()` every frame. Set to `false` to poll manually.
+
 **Static Query Methods:**
 *   `get_monitors() -> Array`: Returns an array of dictionaries describing available monitors. Each dictionary contains: `id`, `name`, `x`, `y`, `width`, `height`, `scale`.
 *   `get_windows() -> Array`: Returns an array of dictionaries describing available windows. Each dictionary contains: `id`, `name`, `x`, `y`, `width`, `height`.
@@ -265,7 +276,7 @@ Captures screen content from monitors or individual windows using the native [fr
 *   `is_paused() -> bool`: Returns whether capture is currently paused.
 
 **Frame Access:**
-*   `poll() -> bool`: Polls for a new frame and updates the texture. Call this in `_process()`. Returns `true` if a new frame was received.
+*   `poll() -> bool`: Polls for a new frame and updates the texture. Called automatically when `auto_poll` is `true`. Returns `true` if a new frame was received.
 *   `get_texture() -> ImageTexture`: Returns the texture containing the latest captured frame.
 *   `get_image() -> Image`: Returns the latest captured frame as an Image.
 *   `screenshot() -> Image`: Takes a single screenshot and returns it immediately (does not require `start()`).
@@ -273,8 +284,12 @@ Captures screen content from monitors or individual windows using the native [fr
 **Cleanup:**
 *   `close()`: Stops capture and releases all resources.
 
+**Auto-Poll:**
+*   `set_auto_poll(enabled: bool)`: Enables or disables automatic per-frame polling.
+*   `get_auto_poll() -> bool`: Returns whether automatic polling is enabled.
+
 **Signals:**
-*   `frame_received`: Emitted when a new frame is available after `poll()`.
+*   `frame_received`: Emitted when a new frame is available after `poll()`. **Avoid connecting heavy per-frame work** (image processing, `capture_frame()`) to this signal — it fires at capture rate (30-60+ fps) and adds signal dispatch overhead. Prefer polling in `_process()` instead (see [Quickstart > Screen Capture](../quickstart#screen-capture)).
 
 **Enums:**
 *   `PermissionLevel`: `PERMISSION_OK = 0`, `PERMISSION_WARNING = 1`, `PERMISSION_ERROR = 2`

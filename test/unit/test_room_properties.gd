@@ -77,6 +77,27 @@ func test_connect_with_auto_reconnect_false():
 	await wait_seconds(0.5)
 
 
+func test_auto_poll_default_true():
+	var room := LiveKitRoom.new()
+	assert_true(room.get_auto_poll(),
+		"auto_poll should default to true")
+
+
+func test_auto_poll_set_false():
+	var room := LiveKitRoom.new()
+	room.set_auto_poll(false)
+	assert_false(room.get_auto_poll(),
+		"auto_poll should be false after set_auto_poll(false)")
+
+
+func test_auto_poll_set_true_again():
+	var room := LiveKitRoom.new()
+	room.set_auto_poll(false)
+	room.set_auto_poll(true)
+	assert_true(room.get_auto_poll(),
+		"auto_poll should be true after re-enabling")
+
+
 func test_room_is_ref_counted():
 	var room := LiveKitRoom.new()
 	assert_true(room is RefCounted, "LiveKitRoom should be RefCounted")

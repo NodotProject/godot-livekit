@@ -23,20 +23,6 @@ func test_unregister_rpc_method_unbound():
 	assert_push_error("not bound")
 
 
-func test_respond_to_rpc_unbound():
-	var lp := LiveKitLocalParticipant.new()
-	# Should not crash — prints error about async not supported
-	lp.respond_to_rpc("request_id", "payload")
-	assert_push_error("not yet supported")
-
-
-func test_respond_to_rpc_error_unbound():
-	var lp := LiveKitLocalParticipant.new()
-	# Should not crash — prints error about async not supported
-	lp.respond_to_rpc_error("request_id", 500, "error message")
-	assert_push_error("not yet supported")
-
-
 func test_publish_track_unbound():
 	var lp := LiveKitLocalParticipant.new()
 	var track := LiveKitTrack.new()

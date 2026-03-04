@@ -41,6 +41,17 @@ private:
     std::atomic<bool> has_pending_{false};
     std::atomic<bool> capturing_{false};
 
+    // Shared sentinel for poller safety — stays valid after destruction.
+    std::shared_ptr<std::atomic<bool>> alive_ = std::make_shared<std::atomic<bool>>(true);
+
+    // Cached frame buffers — reused across poll() calls to avoid per-frame allocations.
+    PackedByteArray cached_pba_;
+    size_t last_width_{0};
+    size_t last_height_{0};
+
+    // Auto-poll: when true, the poller calls poll() every frame automatically.
+    bool auto_poll_{true};
+
 protected:
     static void _bind_methods();
 
@@ -75,6 +86,9 @@ public:
 
     // Cleanup
     void close();
+
+    void set_auto_poll(bool enabled);
+    bool get_auto_poll() const;
 };
 
 }

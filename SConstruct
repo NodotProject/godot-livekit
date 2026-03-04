@@ -14,7 +14,7 @@ if not platform:
         platform = 'linux'
 
 target = ARGUMENTS.get('target', 'template_release')
-arch = ARGUMENTS.get('arch', 'universal' if platform == 'macos' else 'x86_64')
+arch = ARGUMENTS.get('arch', 'arm64' if platform == 'macos' else 'x86_64')
 
 is_windows = platform == 'windows'
 
@@ -70,13 +70,9 @@ else:
     env.Append(CCFLAGS=['-fPIC'])
     env.Append(CXXFLAGS=['-std=c++20'])
     if platform == 'macos':
-        if arch == 'universal':
-            env.Append(CCFLAGS=['-arch', 'x86_64', '-arch', 'arm64'])
-            env.Append(LINKFLAGS=['-arch', 'x86_64', '-arch', 'arm64'])
-        else:
-            env.Append(CCFLAGS=['-arch', arch])
-            env.Append(LINKFLAGS=['-arch', arch])
-        env.Append(LINKFLAGS=['-Wl,-rpath,@loader_path'])
+        env.Append(CCFLAGS=['-arch', arch])
+        env.Append(LINKFLAGS=['-arch', arch])
+        env.Append(LINKFLAGS=['-Wl,-rpath,@loader_path', f'-Wl,-rpath,@loader_path/macos-{arch}'])
     elif platform == 'linux':
         env.Append(LINKFLAGS=['-Wl,-rpath,\\$$ORIGIN'])
 
@@ -146,6 +142,7 @@ src_files = [
     'src/livekit_video_source.cpp',
     'src/livekit_audio_source.cpp',
     'src/livekit_screen_capture.cpp',
+    'src/livekit_poller.cpp',
 ]
 
 if enable_e2ee:
