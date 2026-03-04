@@ -15,7 +15,7 @@ jobs:
           - os: ubuntu-latest
             os-name: Linux
             platform: linux
-          - os: windows-latest
+          - os: blacksmith-4vcpu-windows-2025
             os-name: Windows
             platform: windows
           - os: macos-latest

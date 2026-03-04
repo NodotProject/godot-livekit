@@ -23,7 +23,7 @@ jobs:
           - os: ubuntu-latest
             os-name: Linux
             platform: linux
-          - os: windows-latest
+          - os: blacksmith-4vcpu-windows-2025
             os-name: Windows
             platform: windows
           - os: macos-latest
@@ -78,7 +78,7 @@ jobs:
 
   release:
     name: Create GitHub Release
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [build]
     if: startsWith(github.ref, 'refs/tags/')
     steps:
