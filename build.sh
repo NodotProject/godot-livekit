@@ -18,6 +18,7 @@ SCONS_FLAGS=""
 LIVEKIT_VERSION="0.3.1"
 GODOT_CPP_VERSION="godot-4.5-stable"
 FRAMETAP_VERSION="0.1.3"
+SKIP_FRAMETAP=false
 
 # Verify a downloaded file's SHA-256 hash (if a hash is provided).
 verify_checksum() {
@@ -49,10 +50,11 @@ verify_checksum() {
 BUILD_TARGET="template_release"
 
 show_usage() {
-    echo -e "${YELLOW}Usage: $0 [linux|macos|windows] [arm64|x86_64] [--debug]${NC}"
+    echo -e "${YELLOW}Usage: $0 [linux|macos|windows|android] [arm64|x86_64] [--debug]${NC}"
     echo "  linux: Build for Linux (x86_64)"
     echo "  macos [arm64|x86_64]: Build for macOS (defaults to host arch)"
     echo "  windows: Build for Windows (x86_64, cross-compile)"
+    echo "  android [arm64]: Build for Android (arm64, requires ANDROID_NDK_ROOT)"
     echo "  --debug: Build debug variant (template_debug) instead of release"
     exit 1
 }
@@ -94,6 +96,16 @@ setup_windows() {
     LIVEKIT_ARCHIVE="livekit-sdk-windows-x64-${LIVEKIT_VERSION}.zip"
     LIVEKIT_URL="https://github.com/krazyjakee/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
     echo -e "${BLUE}=== Godot-LiveKit Local Build Script (Windows Native) ===${NC}"
+}
+
+setup_android() {
+    PLATFORM="android"
+    ARCH="arm64"
+    SCONS_FLAGS="platform=android arch=arm64 screen_capture=no"
+    LIVEKIT_ARCHIVE="livekit-sdk-android-arm64-${LIVEKIT_VERSION}.tar.gz"
+    LIVEKIT_URL="https://github.com/krazyjakee/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
+    SKIP_FRAMETAP=true
+    echo -e "${BLUE}=== Godot-LiveKit Local Build Script (Android arm64) ===${NC}"
 }
 
 # --- Build Functions ---
@@ -308,16 +320,36 @@ install_dependencies() {
             echo -e "${RED}macOS build requires a macOS environment. Current OS: $OSTYPE${NC}"
             exit 1
         fi
-        
+
         local required_tools=("scons" "curl" "tar" "unzip")
         local missing_tools=()
-        
+
         for tool in "${required_tools[@]}"; do
             if ! command -v "$tool" &> /dev/null; then
                 missing_tools+=("$tool")
             fi
         done
-        
+
+        if [ ${#missing_tools[@]} -ne 0 ]; then
+            echo -e "${RED}Missing required tools: ${missing_tools[*]}${NC}"
+            exit 1
+        fi
+    elif [ "$PLATFORM" == "android" ]; then
+        local ndk_root="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
+        if [ -z "$ndk_root" ] || [ ! -d "$ndk_root" ]; then
+            echo -e "${RED}ANDROID_NDK_ROOT or ANDROID_NDK_HOME must be set and point to a valid NDK installation${NC}"
+            exit 1
+        fi
+
+        local required_tools=("scons" "curl" "tar")
+        local missing_tools=()
+
+        for tool in "${required_tools[@]}"; do
+            if ! command -v "$tool" &> /dev/null; then
+                missing_tools+=("$tool")
+            fi
+        done
+
         if [ ${#missing_tools[@]} -ne 0 ]; then
             echo -e "${RED}Missing required tools: ${missing_tools[*]}${NC}"
             exit 1
@@ -335,7 +367,11 @@ build_main_project() {
     
     # Copy shared libraries next to the Godot GDExtension library so they can be loaded
     echo -e "${YELLOW}Copying LiveKit shared libraries to bin...${NC}"
-    if [ "$PLATFORM" == "linux" ]; then
+    if [ "$PLATFORM" == "android" ]; then
+        local dep_dir="addons/godot-livekit/bin/android-arm64"
+        mkdir -p "$dep_dir"
+        cp livekit-sdk/lib/*.so "$dep_dir/" || true
+    elif [ "$PLATFORM" == "linux" ]; then
         cp livekit-sdk/lib/*.so* addons/godot-livekit/bin/ || true
     elif [ "$PLATFORM" == "windows" ]; then
         cp livekit-sdk/bin/*.dll addons/godot-livekit/bin/ || true
@@ -370,7 +406,7 @@ main() {
             --debug)
                 BUILD_TARGET="template_debug"
                 ;;
-            linux|macos|windows)
+            linux|macos|windows|android)
                 platform_arg="$arg"
                 ;;
             arm64|x86_64)
@@ -396,14 +432,19 @@ main() {
         windows)
             setup_windows
             ;;
+        android)
+            setup_android
+            ;;
     esac
 
     echo -e "${BLUE}Platform: ${PLATFORM}, Architecture: ${ARCH}${NC}"
     echo ""
 
     install_dependencies
-    
-    if ! check_frametap_cache; then
+
+    if [ "$SKIP_FRAMETAP" = true ]; then
+        echo -e "${YELLOW}Skipping frametap (not supported on ${PLATFORM})${NC}"
+    elif ! check_frametap_cache; then
         fetch_frametap
     else
         echo -e "${GREEN}Using cached frametap${NC}"

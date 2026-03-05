@@ -26,6 +26,10 @@ jobs:
             os-name: macOS (x86_64)
             platform: macos
             arch: x86_64
+          - os: ubuntu-latest
+            os-name: Android (arm64)
+            platform: android
+            arch: arm64
 
     steps:
     - name: Checkout repository
@@ -45,6 +49,12 @@ jobs:
       if: matrix.platform == 'linux'
       run: sudo apt-get update && sudo apt-get install -y libx11-dev libxext-dev libxfixes-dev libxinerama-dev libwayland-dev libpipewire-0.3-dev libsystemd-dev
 
+    - name: Set up Android NDK
+      if: matrix.platform == 'android'
+      uses: nttld/setup-ndk@v1
+      with:
+        ndk-version: r26d
+
     - name: Cache dependencies
       uses: actions/cache@v4
       with:
@@ -57,7 +67,7 @@ jobs:
       run: ./build.sh ${{ matrix.platform }} ${{ matrix.arch || '' }}
 
     - name: Download Godot 4 Headless
-      if: matrix.platform != 'windows'
+      if: matrix.platform != 'windows' && matrix.platform != 'android'
       run: |
         if [ "${{ matrix.platform }}" == "linux" ]; then
           wget https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v4.5-stable_linux.x86_64.zip
@@ -75,7 +85,7 @@ jobs:
       run: brew install coreutils
 
     - name: Install GUT
-      if: matrix.platform != 'windows'
+      if: matrix.platform != 'windows' && matrix.platform != 'android'
       run: |
         git clone --depth 1 --branch v9.3.0 https://github.com/bitwes/Gut.git /tmp/gut
         mkdir -p addons
@@ -83,11 +93,11 @@ jobs:
         rm -rf /tmp/gut
 
     - name: Run tests
-      if: matrix.platform != 'windows'
+      if: matrix.platform != 'windows' && matrix.platform != 'android'
       run: ./test.sh
 
     - name: Upload test results
-      if: matrix.platform != 'windows' && always()
+      if: matrix.platform != 'windows' && matrix.platform != 'android' && always()
       uses: actions/upload-artifact@v4
       with:
         name: test-results-${{ matrix.os-name }}-${{ matrix.arch || matrix.platform }}
