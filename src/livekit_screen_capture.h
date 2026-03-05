@@ -1,6 +1,8 @@
 #ifndef GODOT_LIVEKIT_SCREEN_CAPTURE_H
 #define GODOT_LIVEKIT_SCREEN_CAPTURE_H
 
+#ifdef LIVEKIT_SCREEN_CAPTURE_SUPPORTED
+
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -94,5 +96,7 @@ public:
 }
 
 VARIANT_ENUM_CAST(LiveKitScreenCapture::PermissionLevel)
+
+#endif // LIVEKIT_SCREEN_CAPTURE_SUPPORTED
 
 #endif // GODOT_LIVEKIT_SCREEN_CAPTURE_H

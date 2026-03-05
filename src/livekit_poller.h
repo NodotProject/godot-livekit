@@ -10,7 +10,9 @@ namespace godot {
 
 class LiveKitRoom;
 class LiveKitVideoStream;
+#ifdef LIVEKIT_SCREEN_CAPTURE_SUPPORTED
 class LiveKitScreenCapture;
+#endif
 
 // Singleton that auto-polls all registered LiveKit objects every frame.
 // Uses register_frame_callback() — no SceneTree node needed.
@@ -32,8 +34,10 @@ public:
 	void register_video_stream(LiveKitVideoStream *ptr, std::shared_ptr<std::atomic<bool>> alive);
 	void unregister_video_stream(LiveKitVideoStream *ptr);
 
+#ifdef LIVEKIT_SCREEN_CAPTURE_SUPPORTED
 	void register_screen_capture(LiveKitScreenCapture *ptr, std::shared_ptr<std::atomic<bool>> alive);
 	void unregister_screen_capture(LiveKitScreenCapture *ptr);
+#endif
 
 	// Called once per frame from the registered frame callback.
 	void poll_all();
@@ -51,15 +55,19 @@ private:
 		LiveKitVideoStream *ptr;
 		std::shared_ptr<std::atomic<bool>> alive;
 	};
+#ifdef LIVEKIT_SCREEN_CAPTURE_SUPPORTED
 	struct ScreenEntry {
 		LiveKitScreenCapture *ptr;
 		std::shared_ptr<std::atomic<bool>> alive;
 	};
+#endif
 
 	std::mutex mutex_;
 	std::vector<RoomEntry> rooms_;
 	std::vector<VideoEntry> video_streams_;
+#ifdef LIVEKIT_SCREEN_CAPTURE_SUPPORTED
 	std::vector<ScreenEntry> screen_captures_;
+#endif
 };
 
 } // namespace godot

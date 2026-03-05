@@ -1,7 +1,9 @@
 #include "livekit_poller.h"
 #include "livekit_room.h"
 #include "livekit_video_stream.h"
+#ifdef LIVEKIT_SCREEN_CAPTURE_SUPPORTED
 #include "livekit_screen_capture.h"
+#endif
 
 #include <algorithm>
 
@@ -42,6 +44,7 @@ void LiveKitPoller::unregister_video_stream(LiveKitVideoStream *ptr) {
 		video_streams_.end());
 }
 
+#ifdef LIVEKIT_SCREEN_CAPTURE_SUPPORTED
 void LiveKitPoller::register_screen_capture(LiveKitScreenCapture *ptr, std::shared_ptr<std::atomic<bool>> alive) {
 	std::lock_guard<std::mutex> lock(mutex_);
 	for (const auto &e : screen_captures_) {
@@ -57,6 +60,7 @@ void LiveKitPoller::unregister_screen_capture(LiveKitScreenCapture *ptr) {
 			[ptr](const ScreenEntry &e) { return e.ptr == ptr; }),
 		screen_captures_.end());
 }
+#endif
 
 // --- Polling ---
 
@@ -66,12 +70,16 @@ void LiveKitPoller::poll_all() {
 	// deadlocking (std::mutex is not re-entrant).
 	std::vector<RoomEntry> rooms_snap;
 	std::vector<VideoEntry> video_snap;
+#ifdef LIVEKIT_SCREEN_CAPTURE_SUPPORTED
 	std::vector<ScreenEntry> screen_snap;
+#endif
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
 		rooms_snap = rooms_;
 		video_snap = video_streams_;
+#ifdef LIVEKIT_SCREEN_CAPTURE_SUPPORTED
 		screen_snap = screen_captures_;
+#endif
 	}
 
 	// Poll without holding the lock.
@@ -81,9 +89,11 @@ void LiveKitPoller::poll_all() {
 	for (auto &e : video_snap) {
 		if (e.alive->load()) e.ptr->poll();
 	}
+#ifdef LIVEKIT_SCREEN_CAPTURE_SUPPORTED
 	for (auto &e : screen_snap) {
 		if (e.alive->load()) e.ptr->poll();
 	}
+#endif
 
 	// GC dead entries under a separate lock acquisition.
 	{
@@ -96,9 +106,11 @@ void LiveKitPoller::poll_all() {
 			std::remove_if(video_streams_.begin(), video_streams_.end(),
 				[](const VideoEntry &e) { return !e.alive->load(); }),
 			video_streams_.end());
+#ifdef LIVEKIT_SCREEN_CAPTURE_SUPPORTED
 		screen_captures_.erase(
 			std::remove_if(screen_captures_.begin(), screen_captures_.end(),
 				[](const ScreenEntry &e) { return !e.alive->load(); }),
 			screen_captures_.end());
+#endif
 	}
 }
