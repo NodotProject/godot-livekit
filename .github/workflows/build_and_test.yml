@@ -76,6 +76,7 @@ jobs:
         elif [ "${{ matrix.platform }}" == "macos" ]; then
           wget https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v4.5-stable_macos.universal.zip
           unzip Godot_v4.5-stable_macos.universal.zip
+          xattr -cr Godot.app
           mv Godot.app/Contents/MacOS/Godot godot
         fi
         chmod +x godot
