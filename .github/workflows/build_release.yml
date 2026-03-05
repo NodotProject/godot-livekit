@@ -74,6 +74,13 @@ jobs:
         shell: bash
         run: ./build.sh ${{ matrix.platform }} ${{ matrix.arch || '' }}
 
+      - name: Ad-hoc codesign macOS dylibs
+        if: matrix.platform == 'macos'
+        run: |
+          for dylib in addons/godot-livekit/bin/*.dylib addons/godot-livekit/bin/**/*.dylib; do
+            [ -f "$dylib" ] && codesign --force --sign - "$dylib"
+          done
+
       - name: Package addon
         shell: bash
         run: |
