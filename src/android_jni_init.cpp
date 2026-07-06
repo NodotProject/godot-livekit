@@ -1,19 +1,30 @@
-// Fix for issue #3: SIGSEGV inside connect_to_room on Android arm64.
+// Fix for issue #3: crash inside connect_to_room on Android arm64.
 //
-// LiveKit's Rust WebRTC layer (liblivekit_ffi.so) requires JNI initialization
-// on Android before it touches AudioRecord/AudioManager/MediaCodec; without it
-// the first connect crashes with a null-pointer dereference on a tokio worker
-// thread. liblivekit_ffi.so ships WebRTC's Android JNI glue and exports its own
-// JNI_OnLoad, but the Java runtime only auto-invokes JNI_OnLoad on the library
-// named in System.loadLibrary — dependencies pulled in by the dynamic linker
-// (like liblivekit_ffi.so) never get the call. So we forward it ourselves.
+// Two Android-specific requirements meet here:
 //
-// Two paths, in order of preference:
-//  1. This library's own JNI_OnLoad below fires when the extension is loaded
-//     via System.loadLibrary, and forwards the received JavaVM. (Same pattern
-//     decentraland/godot-explorer ships on the Play Store.)
-//  2. If the engine dlopen()ed us instead (no JNI_OnLoad), we recover the
-//     already-created VM via JNI_GetCreatedJavaVMs at module init time.
+// 1. LiveKit's WebRTC layer (liblivekit_ffi.so) needs JNI initialization —
+//    its JNI_OnLoad wires the org.webrtc Java glue (on Android, WebRTC does
+//    all mic/speaker I/O through Java AudioRecord/AudioTrack). Godot loads
+//    GDExtensions with dlopen(), so that JNI_OnLoad never runs by itself.
+//
+// 2. ART resolves a Java native method ONLY against libraries loaded with
+//    System.loadLibrary in that class's classloader. A dlopen()ed library's
+//    exported Java_* symbols are invisible to resolution, so merely calling
+//    the FFI's JNI_OnLoad ourselves is not enough — org.webrtc.* natives
+//    still throw UnsatisfiedLinkError (verified on Quest 3 / Android 14).
+//
+// Both are solved the same way: at module init, reflectively call
+// System.loadLibrary for the FFI library (fires its JNI_OnLoad exactly once
+// AND registers its natives with the app classloader) and for this library
+// (registers the AV1 stubs below). In app processes a caller-less JNI
+// System.loadLibrary resolves to ClassLoader.getSystemClassLoader(), which
+// is the application PathClassLoader — the same loader that holds the
+// org.webrtc classes from libwebrtc.jar.
+//
+// Packaging note: the org.webrtc Java classes themselves come from
+// libwebrtc.jar (from the same prebuilt the FFI is built against; see the
+// rust-sdks webrtc release tag) and must be included in the app's gradle
+// build, e.g. android/build/libs/{debug,release}/ in a Godot project.
 
 #ifdef ANDROID_ENABLED
 
@@ -26,33 +37,9 @@
 
 namespace {
 
-using JniOnLoadFn = jint (*)(JavaVM *, void *);
 using GetCreatedVMsFn = jint (*)(JavaVM **, jsize, jsize *);
 
 bool jni_initialized = false;
-
-void forward_to_livekit_ffi(JavaVM *vm) {
-    if (jni_initialized || vm == nullptr) {
-        return;
-    }
-    // liblivekit_ffi.so is already loaded as a DT_NEEDED dependency of this
-    // library; dlopen just hands us a handle to it.
-    void *ffi = dlopen("liblivekit_ffi.so", RTLD_NOW | RTLD_GLOBAL);
-    if (ffi == nullptr) {
-        godot::UtilityFunctions::push_error(
-                "godot-livekit android: dlopen(liblivekit_ffi.so) failed: ",
-                dlerror());
-        return;
-    }
-    JniOnLoadFn on_load = reinterpret_cast<JniOnLoadFn>(dlsym(ffi, "JNI_OnLoad"));
-    if (on_load == nullptr) {
-        godot::UtilityFunctions::push_error(
-                "godot-livekit android: liblivekit_ffi.so does not export JNI_OnLoad");
-        return;
-    }
-    on_load(vm, nullptr);
-    jni_initialized = true;
-}
 
 // JNI_GetCreatedJavaVMs is not part of the stable NDK surface, so probe the
 // dynamic linker for it instead of linking against it.
@@ -83,14 +70,48 @@ JavaVM *query_created_vm() {
     return vm;
 }
 
+bool java_load_library(JNIEnv *env, const char *name) {
+    jclass system_cls = env->FindClass("java/lang/System");
+    if (system_cls == nullptr) {
+        env->ExceptionClear();
+        godot::UtilityFunctions::push_error(
+                "godot-livekit android: FindClass(java/lang/System) failed");
+        return false;
+    }
+    jmethodID load_library = env->GetStaticMethodID(
+            system_cls, "loadLibrary", "(Ljava/lang/String;)V");
+    if (load_library == nullptr) {
+        env->ExceptionClear();
+        env->DeleteLocalRef(system_cls);
+        godot::UtilityFunctions::push_error(
+                "godot-livekit android: System.loadLibrary method not found");
+        return false;
+    }
+    jstring jname = env->NewStringUTF(name);
+    env->CallStaticVoidMethod(system_cls, load_library, jname);
+    bool ok = true;
+    if (env->ExceptionCheck()) {
+        env->ExceptionDescribe();  // details go to logcat
+        env->ExceptionClear();
+        godot::UtilityFunctions::push_error(
+                "godot-livekit android: System.loadLibrary(", name,
+                ") threw — org.webrtc natives will not resolve");
+        ok = false;
+    }
+    env->DeleteLocalRef(jname);
+    env->DeleteLocalRef(system_cls);
+    return ok;
+}
+
 } // namespace
 
 extern "C" {
 
-// Invoked automatically by the Android runtime when this library is loaded
-// via System.loadLibrary.
-JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void * /*reserved*/) {
-    forward_to_livekit_ffi(vm);
+// Fires only if this library itself is loaded via System.loadLibrary (either
+// by livekit_android_jni_init below, or by a future Godot that Java-loads
+// GDExtensions). Registration side effects are handled by the runtime; there
+// is nothing else to do here.
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM * /*vm*/, void * /*reserved*/) {
     return JNI_VERSION_1_6;
 }
 
@@ -114,14 +135,29 @@ void livekit_android_jni_init() {
     if (jni_initialized) {
         return;
     }
-    // JNI_OnLoad never ran, so the library was dlopen()ed. Recover the VM.
-    forward_to_livekit_ffi(query_created_vm());
-    if (!jni_initialized) {
+    JavaVM *vm = query_created_vm();
+    if (vm == nullptr) {
         godot::UtilityFunctions::push_error(
-                "godot-livekit android: could not obtain the JavaVM (JNI_OnLoad "
-                "never ran and JNI_GetCreatedJavaVMs is unavailable). LiveKit's "
-                "WebRTC layer is uninitialized and connect_to_room will crash.");
+                "godot-livekit android: could not obtain the JavaVM "
+                "(JNI_GetCreatedJavaVMs unavailable). LiveKit's WebRTC layer "
+                "is uninitialized and connect_to_room will crash.");
+        return;
     }
+    JNIEnv *env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) != JNI_OK
+            || env == nullptr) {
+        if (vm->AttachCurrentThread(&env, nullptr) != JNI_OK || env == nullptr) {
+            godot::UtilityFunctions::push_error(
+                    "godot-livekit android: could not attach a JNIEnv");
+            return;
+        }
+    }
+    // Order matters: the FFI library first (WebRTC JNI init + native
+    // registration), then this library (AV1 stubs). Both calls are idempotent
+    // for already-Java-loaded libraries.
+    bool ok = java_load_library(env, "livekit_ffi");
+    ok = java_load_library(env, "godot-livekit.android.arm64") && ok;
+    jni_initialized = ok;
 }
 
 #endif // ANDROID_ENABLED
