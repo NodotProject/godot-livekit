@@ -12,6 +12,9 @@
 #endif
 #include "livekit_poller.h"
 #include "thread_pool.h"
+#ifdef ANDROID_ENABLED
+#include "android_jni_init.h"
+#endif
 #ifdef LIVEKIT_E2EE_SUPPORTED
 #include "livekit_e2ee.h"
 #endif
@@ -32,6 +35,12 @@ void initialize_livekit_module(ModuleInitializationLevel p_level) {
     if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
         return;
     }
+
+#ifdef ANDROID_ENABLED
+    // WebRTC needs JNI globals before any SDK use (issue #3); no-op if our
+    // JNI_OnLoad already handled it at library load.
+    livekit_android_jni_init();
+#endif
 
     livekit::initialize();
 
