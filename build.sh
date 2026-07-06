@@ -147,9 +147,12 @@ fetch_godotcpp() {
         gcpp_flags="$gcpp_flags arch=${ARCH}"
     fi
     if [ "$PLATFORM" == "android" ]; then
-        # godot-cpp's android toolchain honors ANDROID_NDK_ROOT; CI setups
-        # commonly export only ANDROID_NDK_HOME.
         export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
+        # godot-cpp resolves $ANDROID_HOME/ndk/<its pinned version> BEFORE the
+        # ANDROID_NDK_ROOT fallback (and KeyErrors if ANDROID_HOME is entirely
+        # unset). Force ANDROID_HOME empty on the scons command line so the
+        # NDK that install_dependencies validated is the one actually used.
+        gcpp_flags="$gcpp_flags ANDROID_HOME="
     fi
     (cd godot-cpp && scons $gcpp_flags)
 
