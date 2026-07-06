@@ -5,6 +5,8 @@ on:
   push:
     tags:
       - "v*.*.*"
+    branches:
+      - "fix/**"
 
 permissions:
   contents: write
@@ -18,6 +20,7 @@ jobs:
     name: Build for ${{ matrix.os-name }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false  # one platform failing must not cancel the others
       matrix:
         include:
           - os: ubuntu-latest
