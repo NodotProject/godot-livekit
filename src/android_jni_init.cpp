@@ -94,6 +94,20 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void * /*reserved*/) {
     return JNI_VERSION_1_6;
 }
 
+// libwebrtc.jar declares AV1 codec classes whose native methods
+// liblivekit_ffi.so does not export (libaom is not compiled in). Stub them so
+// codec enumeration reports AV1 unsupported instead of throwing
+// UnsatisfiedLinkError. (decentraland/godot-explorer ships the same stub.)
+JNIEXPORT jboolean JNICALL
+Java_org_webrtc_LibaomAv1Decoder_nativeIsSupported(JNIEnv *, jclass) {
+    return JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_org_webrtc_LibaomAv1Encoder_nativeIsSupported(JNIEnv *, jclass) {
+    return JNI_FALSE;
+}
+
 } // extern "C"
 
 void livekit_android_jni_init() {
