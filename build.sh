@@ -129,28 +129,32 @@ check_godotcpp_cache() {
     return 1
 }
 
-# Function to fetch godot-cpp prebuilt
+# Function to build godot-cpp from source.
+# (Previously fetched a prebuilt from NodotProject/godot-cpp-builds, but the
+# godot-4.5-stable release asset was re-uploaded 2026-05-28 with an empty bin/
+# directory — no static libraries — which broke every fresh build. Building
+# from the official godotengine/godot-cpp tag is deterministic; CI caches the
+# result so the cost is paid once per platform.)
 fetch_godotcpp() {
-    echo -e "${YELLOW}Fetching godot-cpp prebuilt (${GODOT_CPP_VERSION})...${NC}"
-    
-    local archive="godot-cpp-prebuilt-${GODOT_CPP_VERSION}.zip"
-    local url="https://github.com/NodotProject/godot-cpp-builds/releases/download/${GODOT_CPP_VERSION}/${archive}"
-    
+    echo -e "${YELLOW}Building godot-cpp from source (${GODOT_CPP_VERSION}, target=${BUILD_TARGET})...${NC}"
+
     rm -rf godot-cpp
-    mkdir -p godot-cpp
-    
-    echo -e "${YELLOW}Downloading ${url}...${NC}"
-    curl -sL "${url}" -o "${archive}"
-    
-    echo -e "${YELLOW}Extracting...${NC}"
-    mkdir -p godot-cpp-temp
-    unzip -q "${archive}" -d godot-cpp-temp
-    
-    mv godot-cpp-temp/godot-cpp-prebuilt/* godot-cpp/
-    rm -rf godot-cpp-temp "${archive}"
-    
+    git clone --depth 1 --branch "${GODOT_CPP_VERSION}" \
+        https://github.com/godotengine/godot-cpp.git godot-cpp
+
+    local gcpp_flags="platform=${PLATFORM} target=${BUILD_TARGET}"
+    if [ -n "$ARCH" ]; then
+        gcpp_flags="$gcpp_flags arch=${ARCH}"
+    fi
+    if [ "$PLATFORM" == "android" ]; then
+        # godot-cpp's android toolchain honors ANDROID_NDK_ROOT; CI setups
+        # commonly export only ANDROID_NDK_HOME.
+        export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
+    fi
+    (cd godot-cpp && scons $gcpp_flags)
+
     echo "$GODOT_CPP_VERSION" > godot-cpp/.version
-    echo -e "${GREEN}godot-cpp prebuilt downloaded and extracted successfully!${NC}"
+    echo -e "${GREEN}godot-cpp built successfully!${NC}"
 }
 
 # Function to download livekit
