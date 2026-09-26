@@ -29,15 +29,30 @@ func test_process_stream_returns_frame():
 	assert_eq(out.size(), FRAME, "process_stream should return a full 10ms frame")
 
 
-func test_process_stream_rejects_non_10ms_frames():
+func test_process_stream_accepts_multiple_frames():
+	var batched = LiveKitAudioProcessingModule.create({"echo_cancellation": true, "noise_suppression": true})
+	var framewise = LiveKitAudioProcessingModule.create({"echo_cancellation": true, "noise_suppression": true})
+	var far := _tone(3)
+	var near := _tone(3)
+	assert_true(batched.process_reverse_stream(far, SAMPLE_RATE, 1), "reverse stream should accept 30ms")
+	var batched_out: PackedFloat32Array = batched.process_stream(near, SAMPLE_RATE, 1)
+	var framewise_out := PackedFloat32Array()
+	for f in 3:
+		framewise.process_reverse_stream(far.slice(f * FRAME, (f + 1) * FRAME), SAMPLE_RATE, 1)
+	for f in 3:
+		framewise_out.append_array(framewise.process_stream(near.slice(f * FRAME, (f + 1) * FRAME), SAMPLE_RATE, 1))
+	assert_eq(batched_out, framewise_out, "30ms of audio should process like three 10ms frames")
+
+
+func test_process_stream_rejects_partial_frames():
 	var apm = LiveKitAudioProcessingModule.create()
 	var data := PackedFloat32Array()
-	data.resize(100)
-	# The native APM aborts the process on such frames, so they must be rejected up front.
+	data.resize(FRAME + 100)
+	# The native APM aborts the process on partial frames, so they must be rejected up front.
 	var out: PackedFloat32Array = apm.process_stream(data, SAMPLE_RATE, 1)
-	assert_eq(out.size(), 0, "process_stream should reject frames that aren't 10ms")
+	assert_eq(out.size(), 0, "process_stream should reject audio that isn't a multiple of 10ms")
 	assert_false(apm.process_reverse_stream(data, SAMPLE_RATE, 1),
-		"process_reverse_stream should reject frames that aren't 10ms")
+		"process_reverse_stream should reject audio that isn't a multiple of 10ms")
 	assert_push_error(2)
 
 

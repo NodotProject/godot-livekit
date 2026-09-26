@@ -59,34 +59,41 @@ bool LiveKitAudioProcessingModule::_process(const PackedFloat32Array &data, int 
         UtilityFunctions::push_error("LiveKitAudioProcessingModule: not initialized or invalid channel count");
         return false;
     }
-    // The native APM panics (aborting the process) unless frames are exactly 10ms.
-    if (sample_rate <= 0 || sample_rate % 100 != 0 || data.size() != (sample_rate / 100) * num_channels) {
-        UtilityFunctions::push_error("LiveKitAudioProcessingModule: frames must contain exactly 10ms of audio (",
-                (sample_rate / 100) * num_channels, " samples at ", sample_rate, "Hz), got ", data.size());
+    // The native APM panics (aborting the process) unless given whole 10ms frames.
+    const int frame_size = sample_rate > 0 && sample_rate % 100 == 0 ? (sample_rate / 100) * num_channels : 0;
+    if (frame_size == 0 || data.is_empty() || data.size() % frame_size != 0) {
+        UtilityFunctions::push_error("LiveKitAudioProcessingModule: audio must be a multiple of 10ms (",
+                frame_size, " samples at ", sample_rate, "Hz), got ", data.size(), " samples");
         return false;
     }
-    std::vector<int16_t> pcm(data.size());
-    for (int i = 0; i < data.size(); i++) {
-        float sample = CLAMP(data[i], -1.0f, 1.0f);
-        pcm[i] = static_cast<int16_t>(sample * 32767.0f);
+    if (!reverse) {
+        out.resize(data.size());
     }
     // Exceptions must not escape into Godot, where they would terminate the process.
     try {
-        livekit::AudioFrame frame(std::move(pcm), sample_rate, num_channels, data.size() / num_channels);
-        if (reverse) {
-            apm_->processReverseStream(frame);
-            return true;
-        }
-        apm_->processStream(frame);
-        const auto &processed = frame.data();
-        out.resize(processed.size());
-        float *out_ptr = out.ptrw();
-        for (size_t i = 0; i < processed.size(); i++) {
-            out_ptr[i] = processed[i] / 32768.0f;
+        // The C++ SDK documents a 10ms frame limit, so longer audio is processed a frame at a time.
+        for (int offset = 0; offset < data.size(); offset += frame_size) {
+            std::vector<int16_t> pcm(frame_size);
+            for (int i = 0; i < frame_size; i++) {
+                float sample = CLAMP(data[offset + i], -1.0f, 1.0f);
+                pcm[i] = static_cast<int16_t>(sample * 32767.0f);
+            }
+            livekit::AudioFrame frame(std::move(pcm), sample_rate, num_channels, frame_size / num_channels);
+            if (reverse) {
+                apm_->processReverseStream(frame);
+                continue;
+            }
+            apm_->processStream(frame);
+            const auto &processed = frame.data();
+            float *out_ptr = out.ptrw() + offset;
+            for (int i = 0; i < frame_size; i++) {
+                out_ptr[i] = processed[i] / 32768.0f;
+            }
         }
         return true;
     } catch (const std::exception &e) {
         UtilityFunctions::push_error("LiveKitAudioProcessingModule: ", String(e.what()));
+        out.clear();
         return false;
     }
 }

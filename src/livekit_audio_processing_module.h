@@ -14,7 +14,7 @@ namespace godot {
 
 // Exposes WebRTC's audio processing (echo cancellation, noise suppression,
 // gain control, high-pass filter) for audio captured and played by Godot.
-// Frames must contain exactly 10ms of audio.
+// Audio must be a multiple of 10ms long.
 class LiveKitAudioProcessingModule : public RefCounted {
     GDCLASS(LiveKitAudioProcessingModule, RefCounted)
 
