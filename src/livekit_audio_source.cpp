@@ -2,6 +2,8 @@
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <exception>
+
 using namespace godot;
 
 void LiveKitAudioSource::_bind_methods() {
@@ -49,8 +51,14 @@ void LiveKitAudioSource::capture_frame(const PackedFloat32Array &data, int sampl
         pcm_data[i] = static_cast<int16_t>(sample * 32767.0f);
     }
 
-    livekit::AudioFrame frame(std::move(pcm_data), sample_rate, num_channels, samples_per_channel);
-    source_->captureFrame(frame);
+    // Exceptions (e.g. for a frame that isn't 10ms in direct capture mode) must not escape into
+    // Godot, where they would terminate the process.
+    try {
+        livekit::AudioFrame frame(std::move(pcm_data), sample_rate, num_channels, samples_per_channel);
+        source_->captureFrame(frame);
+    } catch (const std::exception &e) {
+        UtilityFunctions::push_error("LiveKitAudioSource::capture_frame: ", String(e.what()));
+    }
 }
 
 void LiveKitAudioSource::clear_queue() {

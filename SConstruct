@@ -192,6 +192,7 @@ src_files = [
     'src/livekit_audio_stream.cpp',
     'src/livekit_video_source.cpp',
     'src/livekit_audio_source.cpp',
+    'src/livekit_audio_processing_module.cpp',
     'src/livekit_poller.cpp',
 ]
 

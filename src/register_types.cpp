@@ -7,6 +7,7 @@
 #include "livekit_audio_stream.h"
 #include "livekit_video_source.h"
 #include "livekit_audio_source.h"
+#include "livekit_audio_processing_module.h"
 #ifdef LIVEKIT_SCREEN_CAPTURE_SUPPORTED
 #include "livekit_screen_capture.h"
 #endif
@@ -62,6 +63,7 @@ void initialize_livekit_module(ModuleInitializationLevel p_level) {
     // Sources
     ClassDB::register_class<LiveKitVideoSource>();
     ClassDB::register_class<LiveKitAudioSource>();
+    ClassDB::register_class<LiveKitAudioProcessingModule>();
 
 #ifdef LIVEKIT_SCREEN_CAPTURE_SUPPORTED
     // Screen Capture
