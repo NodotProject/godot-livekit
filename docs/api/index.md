@@ -200,6 +200,19 @@ Source for creating local audio tracks. Allows capturing audio data from Godot a
 *   `get_sample_rate() -> int`: Returns the configured sample rate.
 *   `get_num_channels() -> int`: Returns the configured number of channels.
 
+### `LiveKitAudioProcessingModule`
+WebRTC audio processing (echo cancellation, noise suppression, automatic gain control and high-pass filtering) for audio captured and played by Godot, e.g. to process microphone audio before passing it to `LiveKitAudioSource.capture_frame()`. All frames must contain exactly 10ms of audio.
+
+For echo cancellation, pass the audio being played to the speakers (e.g. from an `AudioEffectCapture` on the Master bus) to `process_reverse_stream()`, and the microphone audio to `process_stream()`.
+
+**Static Methods:**
+*   `create(options: Dictionary = {}) -> LiveKitAudioProcessingModule`: Creates a new module. Options (all `false` by default): `echo_cancellation`, `noise_suppression`, `high_pass_filter`, `auto_gain_control`.
+
+**Methods:**
+*   `process_stream(data: PackedFloat32Array, sample_rate: int, num_channels: int) -> PackedFloat32Array`: Processes a near-end (microphone) frame, returning the processed samples, or an empty array on failure.
+*   `process_reverse_stream(data: PackedFloat32Array, sample_rate: int, num_channels: int) -> bool`: Provides a far-end (speaker) frame as the echo cancellation reference.
+*   `set_stream_delay_ms(delay_ms: int) -> bool`: Sets the estimated delay between a frame reaching `process_reverse_stream()` and its echo reaching `process_stream()`. Should be called when echo cancellation is enabled.
+
 ### `LiveKitVideoSource`
 Source for creating local video tracks. Allows capturing video frames from Godot and sending them to the room.
 
