@@ -9,6 +9,7 @@
 - **Real-Time Communication**: Connect to LiveKit servers for audio, video, and data streaming.
 - **Full Track Support**: Publish and subscribe to audio/video tracks, with local sources for capturing from Godot.
 - **Screen Capture**: Capture monitors or individual windows natively using the built-in `LiveKitScreenCapture` class (macOS, Windows, Linux).
+- **Audio Processing**: Apply WebRTC echo cancellation, noise suppression, and gain control to audio captured in Godot via `LiveKitAudioProcessingModule`.
 - **Data Channels**: Send and receive arbitrary data messages with reliable or unreliable delivery.
 - **RPC Support**: Perform remote procedure calls between participants.
 - **End-to-End Encryption (E2EE)**: Secure your media streams with configurable encryption, key management, and per-participant frame cryptors.

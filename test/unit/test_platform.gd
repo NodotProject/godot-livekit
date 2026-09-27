@@ -3,7 +3,7 @@ extends GutTest
 
 
 func test_all_classes_registered():
-	# All 17 classes registered in register_types.cpp
+	# All 18 classes registered in register_types.cpp
 	var classes := [
 		# Room
 		"LiveKitRoom",
@@ -27,6 +27,8 @@ func test_all_classes_registered():
 		# Sources
 		"LiveKitVideoSource",
 		"LiveKitAudioSource",
+		# Audio Processing
+		"LiveKitAudioProcessingModule",
 		# Screen Capture
 		"LiveKitScreenCapture",
 	]
