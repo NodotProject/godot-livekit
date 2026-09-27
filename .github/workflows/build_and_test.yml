@@ -10,6 +10,7 @@ jobs:
     name: Build and Test for ${{ matrix.os-name }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false  # one platform failing must not cancel the others
       matrix:
         include:
           - os: ubuntu-latest
@@ -51,9 +52,14 @@ jobs:
 
     - name: Set up Android NDK
       if: matrix.platform == 'android'
+      id: setup-ndk
       uses: nttld/setup-ndk@v1
       with:
         ndk-version: r26d
+
+    - name: Export NDK path
+      if: matrix.platform == 'android'
+      run: echo "ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
 
     - name: Cache dependencies
       uses: actions/cache@v4

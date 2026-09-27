@@ -8,6 +8,11 @@ windows.x86_64 = "res://addons/godot-livekit/bin/libgodot-livekit.windows.x86_64
 macos.arm64 = "res://addons/godot-livekit/bin/libgodot-livekit.macos.arm64.dylib"
 macos.x86_64 = "res://addons/godot-livekit/bin/libgodot-livekit.macos.x86_64.dylib"
 android.arm64 = "res://addons/godot-livekit/bin/libgodot-livekit.android.arm64.so"
+linux.double.x86_64 = "res://addons/godot-livekit/bin/libgodot-livekit.linux.double.x86_64.so"
+windows.double.x86_64 = "res://addons/godot-livekit/bin/libgodot-livekit.windows.double.x86_64.dll"
+macos.double.arm64 = "res://addons/godot-livekit/bin/libgodot-livekit.macos.double.arm64.dylib"
+macos.double.x86_64 = "res://addons/godot-livekit/bin/libgodot-livekit.macos.double.x86_64.dylib"
+android.double.arm64 = "res://addons/godot-livekit/bin/libgodot-livekit.android.double.arm64.so"
 
 [dependencies]
 linux.x86_64 = {"res://addons/godot-livekit/bin/liblivekit_ffi.so": "", "res://addons/godot-livekit/bin/liblivekit.so": ""}
@@ -15,3 +20,8 @@ windows.x86_64 = {"res://addons/godot-livekit/bin/livekit_ffi.dll": "", "res://a
 macos.arm64 = {"res://addons/godot-livekit/bin/macos-arm64/liblivekit_ffi.dylib": "", "res://addons/godot-livekit/bin/macos-arm64/liblivekit.dylib": ""}
 macos.x86_64 = {"res://addons/godot-livekit/bin/macos-x86_64/liblivekit_ffi.dylib": "", "res://addons/godot-livekit/bin/macos-x86_64/liblivekit.dylib": ""}
 android.arm64 = {"res://addons/godot-livekit/bin/android-arm64/liblivekit_ffi.so": "", "res://addons/godot-livekit/bin/android-arm64/liblivekit.so": ""}
+linux.double.x86_64 = {"res://addons/godot-livekit/bin/liblivekit_ffi.so": "", "res://addons/godot-livekit/bin/liblivekit.so": ""}
+windows.double.x86_64 = {"res://addons/godot-livekit/bin/livekit_ffi.dll": "", "res://addons/godot-livekit/bin/livekit.dll": ""}
+macos.double.arm64 = {"res://addons/godot-livekit/bin/macos-arm64/liblivekit_ffi.dylib": "", "res://addons/godot-livekit/bin/macos-arm64/liblivekit.dylib": ""}
+macos.double.x86_64 = {"res://addons/godot-livekit/bin/macos-x86_64/liblivekit_ffi.dylib": "", "res://addons/godot-livekit/bin/macos-x86_64/liblivekit.dylib": ""}
+android.double.arm64 = {"res://addons/godot-livekit/bin/android-arm64/liblivekit_ffi.so": "", "res://addons/godot-livekit/bin/android-arm64/liblivekit.so": ""}

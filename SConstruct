@@ -21,6 +21,14 @@ elif platform == 'macos':
 else:
     arch = ARGUMENTS.get('arch', 'x86_64')
 
+# Floating-point precision; must match both godot-cpp and the Godot build the
+# extension is loaded into ("double" for Godot built with precision=double).
+precision = ARGUMENTS.get('precision', 'single')
+if precision not in ('single', 'double'):
+    print("ERROR: precision must be 'single' or 'double'")
+    Exit(1)
+precision_suffix = '.double' if precision == 'double' else ''
+
 is_windows = platform == 'windows'
 is_android = platform == 'android'
 
@@ -125,14 +133,14 @@ else:
 # Add godot-cpp library
 if platform == 'macos':
     # On macOS, if we build for arm64 or x86_64, we might still want to use the universal godot-cpp lib if specific arch isn't there
-    godot_cpp_lib_specific = f"{lib_prefix}godot-cpp.{platform}.{target}.{arch}{lib_ext}"
-    godot_cpp_lib_uni = f"{lib_prefix}godot-cpp.{platform}.{target}.universal{lib_ext}"
+    godot_cpp_lib_specific = f"{lib_prefix}godot-cpp.{platform}.{target}{precision_suffix}.{arch}{lib_ext}"
+    godot_cpp_lib_uni = f"{lib_prefix}godot-cpp.{platform}.{target}{precision_suffix}.universal{lib_ext}"
     if os.path.exists(os.path.join('godot-cpp', 'bin', godot_cpp_lib_specific)):
         godot_cpp_lib = godot_cpp_lib_specific
     else:
         godot_cpp_lib = godot_cpp_lib_uni
 else:
-    godot_cpp_lib = f"{lib_prefix}godot-cpp.{platform}.{target}.{arch}{lib_ext}"
+    godot_cpp_lib = f"{lib_prefix}godot-cpp.{platform}.{target}{precision_suffix}.{arch}{lib_ext}"
 
 env.Append(LIBS=[File(os.path.join('godot-cpp', 'bin', godot_cpp_lib))])
 
@@ -172,6 +180,9 @@ elif platform == 'macos':
     if enable_screen_capture:
         frameworks.extend(['ScreenCaptureKit', 'CoreGraphics', 'CoreMedia', 'CoreVideo'])
     env.Append(FRAMEWORKS=frameworks)
+
+if precision == 'double':
+    env.Append(CPPDEFINES=['REAL_T_IS_DOUBLE'])
 
 # Screen capture support
 if enable_screen_capture:
@@ -221,7 +232,7 @@ else:  # linux, android
 # builder does not misparse the dots in the platform/arch portion as a
 # file-extension suffix (which causes "should have exactly one target
 # with the suffix: .dll").
-lib_name = f"{env['SHLIBPREFIX']}godot-livekit.{platform}.{arch}{env['SHLIBSUFFIX']}"
+lib_name = f"{env['SHLIBPREFIX']}godot-livekit.{platform}{precision_suffix}.{arch}{env['SHLIBSUFFIX']}"
 library = env.SharedLibrary(target=lib_name, source=src_files)
 installed_library = env.Install('addons/godot-livekit/bin', library)
 Default(installed_library)

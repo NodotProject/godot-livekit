@@ -19,6 +19,13 @@ LIVEKIT_VERSION="0.3.1"
 GODOT_CPP_VERSION="godot-4.5-stable"
 FRAMETAP_VERSION="0.1.3"
 SKIP_FRAMETAP=false
+PRECISION="single"
+API_FILE=""
+# On Android, WebRTC's JNI layer needs the org.webrtc Java classes from
+# libwebrtc.jar, which must come from the same WebRTC build liblivekit_ffi.so
+# was built against (livekit/rust-sdks release tag below).
+WEBRTC_ANDROID_TAG="webrtc-0001d84-2"
+WEBRTC_ANDROID_JAR_SHA256="fd8ab1c0279c047c7056c5e5b9a944975e93336116a1511de1cb27c689cb984a"
 
 # Verify a downloaded file's SHA-256 hash (if a hash is provided).
 verify_checksum() {
@@ -50,12 +57,15 @@ verify_checksum() {
 BUILD_TARGET="template_release"
 
 show_usage() {
-    echo -e "${YELLOW}Usage: $0 [linux|macos|windows|android] [arm64|x86_64] [--debug]${NC}"
+    echo -e "${YELLOW}Usage: $0 [linux|macos|windows|android] [arm64|x86_64] [--debug] [--double --api-file=PATH]${NC}"
     echo "  linux: Build for Linux (x86_64)"
     echo "  macos [arm64|x86_64]: Build for macOS (defaults to host arch)"
     echo "  windows: Build for Windows (x86_64, cross-compile)"
     echo "  android [arm64]: Build for Android (arm64, requires ANDROID_NDK_ROOT)"
     echo "  --debug: Build debug variant (template_debug) instead of release"
+    echo "  --double: Build for double-precision Godot builds (precision=double)"
+    echo "  --api-file=PATH: extension_api.json from your Godot binary (godot --dump-extension-api);"
+    echo "                   required with --double"
     exit 1
 }
 
@@ -119,14 +129,29 @@ check_godotcpp_cache() {
         return 1
     fi
 
-    # Verify version matches
-    if [ -f "godot-cpp/.version" ] && [ "$(cat godot-cpp/.version)" = "$GODOT_CPP_VERSION" ]; then
+    # godot-cpp is built from source per target/precision, so the cached copy
+    # only counts if it was built for this exact variant.
+    if [ -f "godot-cpp/.version" ] && [ "$(cat godot-cpp/.version)" = "$(godotcpp_version_key)" ]; then
         echo -e "${GREEN}godot-cpp cache is valid!${NC}"
         return 0
     fi
 
     echo -e "${RED}Cache miss: godot-cpp version mismatch${NC}"
     return 1
+}
+
+# Cache key for a godot-cpp build of the current variant
+godotcpp_version_key() {
+    local api_key="default"
+    if [ -n "$API_FILE" ]; then
+        api_key=$( (sha256sum "$API_FILE" 2>/dev/null || shasum -a 256 "$API_FILE") | cut -c1-12)
+    fi
+    echo "${GODOT_CPP_VERSION}-${PLATFORM}-${ARCH}-${BUILD_TARGET}-${PRECISION}-${api_key}"
+}
+
+# Number of parallel compile jobs
+num_jobs() {
+    nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2
 }
 
 # Function to build godot-cpp from source.
@@ -142,7 +167,10 @@ fetch_godotcpp() {
     git clone --depth 1 --branch "${GODOT_CPP_VERSION}" \
         https://github.com/godotengine/godot-cpp.git godot-cpp
 
-    local gcpp_flags="platform=${PLATFORM} target=${BUILD_TARGET}"
+    local gcpp_flags="platform=${PLATFORM} target=${BUILD_TARGET} precision=${PRECISION}"
+    if [ -n "$API_FILE" ]; then
+        gcpp_flags="$gcpp_flags custom_api_file=${API_FILE}"
+    fi
     if [ -n "$ARCH" ]; then
         gcpp_flags="$gcpp_flags arch=${ARCH}"
     fi
@@ -154,9 +182,9 @@ fetch_godotcpp() {
         # NDK that install_dependencies validated is the one actually used.
         gcpp_flags="$gcpp_flags ANDROID_HOME="
     fi
-    (cd godot-cpp && scons $gcpp_flags)
+    (cd godot-cpp && scons -j"$(num_jobs)" $gcpp_flags)
 
-    echo "$GODOT_CPP_VERSION" > godot-cpp/.version
+    godotcpp_version_key > godot-cpp/.version
     echo -e "${GREEN}godot-cpp built successfully!${NC}"
 }
 
@@ -366,10 +394,29 @@ install_dependencies() {
     echo -e "${GREEN}All required dependencies are available${NC}"
 }
 
+# Function to fetch libwebrtc.jar (Android only). The org.webrtc Java classes
+# must be in the exported APK, or WebRTC aborts the app on first use.
+fetch_webrtc_jar() {
+    local dest="$1/libwebrtc.jar"
+    if [ -f "$dest" ] && [ -f "$1/.webrtc_version" ] && [ "$(cat "$1/.webrtc_version")" = "$WEBRTC_ANDROID_TAG" ]; then
+        echo -e "${GREEN}Using cached libwebrtc.jar${NC}"
+        return 0
+    fi
+
+    local archive="webrtc-android-arm64-release.zip"
+    local url="https://github.com/livekit/rust-sdks/releases/download/${WEBRTC_ANDROID_TAG}/${archive}"
+    echo -e "${YELLOW}Downloading libwebrtc.jar from ${url}...${NC}"
+    curl -sfL "${url}" -o "${archive}"
+    unzip -q -o -j "${archive}" "android-arm64-release/libwebrtc.jar" -d "$1"
+    rm -f "${archive}"
+    verify_checksum "$dest" "$WEBRTC_ANDROID_JAR_SHA256"
+    echo "$WEBRTC_ANDROID_TAG" > "$1/.webrtc_version"
+}
+
 # Function to build the main project
 build_main_project() {
     echo -e "${YELLOW}Building main project (${BUILD_TARGET})...${NC}"
-    scons $SCONS_FLAGS target=$BUILD_TARGET
+    scons -j"$(num_jobs)" $SCONS_FLAGS target=$BUILD_TARGET precision=$PRECISION
     echo -e "${GREEN}Main project build completed!${NC}"
     
     # Copy shared libraries next to the Godot GDExtension library so they can be loaded
@@ -378,6 +425,7 @@ build_main_project() {
         local dep_dir="addons/godot-livekit/bin/android-arm64"
         mkdir -p "$dep_dir"
         cp livekit-sdk/lib/*.so "$dep_dir/" || true
+        fetch_webrtc_jar "$dep_dir"
     elif [ "$PLATFORM" == "linux" ]; then
         cp livekit-sdk/lib/*.so* addons/godot-livekit/bin/ || true
     elif [ "$PLATFORM" == "windows" ]; then
@@ -413,6 +461,12 @@ main() {
             --debug)
                 BUILD_TARGET="template_debug"
                 ;;
+            --double)
+                PRECISION="double"
+                ;;
+            --api-file=*)
+                API_FILE="${arg#--api-file=}"
+                ;;
             linux|macos|windows|android)
                 platform_arg="$arg"
                 ;;
@@ -427,6 +481,16 @@ main() {
 
     if [ -z "$platform_arg" ]; then
         show_usage
+    fi
+
+    if [ "$PRECISION" == "double" ] && [ ! -f "$API_FILE" ]; then
+        echo -e "${RED}--double needs --api-file=PATH pointing at the extension_api.json of your${NC}"
+        echo -e "${RED}double-precision Godot build (generate it with: godot --dump-extension-api)${NC}"
+        exit 1
+    fi
+    if [ -n "$API_FILE" ]; then
+        # godot-cpp is built from inside godot-cpp/, so make the path absolute
+        API_FILE="$(cd "$(dirname "$API_FILE")" && pwd)/$(basename "$API_FILE")"
     fi
 
     case "$platform_arg" in
