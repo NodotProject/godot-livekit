@@ -195,6 +195,9 @@ src_files = [
     'src/livekit_poller.cpp',
 ]
 
+if is_android:
+    src_files.append('src/android_jni_init.cpp')
+
 if enable_screen_capture:
     src_files.append('src/livekit_screen_capture.cpp')
 
