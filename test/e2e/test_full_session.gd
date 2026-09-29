@@ -12,7 +12,7 @@ func before_each():
 	_data_topic = ""
 
 
-func _on_data_received(data: PackedByteArray, _participant, topic: String):
+func _on_data_received(data: PackedByteArray, _participant, _kind: int, topic: String):
 	_data_received = data
 	_data_topic = topic
 
@@ -22,7 +22,7 @@ func test_connect_publish_subscribe_disconnect():
 		return
 
 	# Step 1: Both rooms connect
-	var both = _connect_both_rooms()
+	var both = await _connect_both_rooms()
 	assert_true(both, "Both rooms should connect and see each other")
 	if not both:
 		return
@@ -33,12 +33,12 @@ func test_connect_publish_subscribe_disconnect():
 	assert_not_null(track, "Audio track should be created")
 	var lp = _room.get_local_participant()
 	lp.publish_track(track, {})
-	var published = _poll_until(_room, func():
+	var published = await _poll_until(_room, func():
 		return lp.get_track_publications().size() > 0, 10.0)
 	assert_true(published, "Track should be published on Room1")
 
 	# Step 3: Room2 sees the remote track
-	var saw_track = _poll_until(_room2, func():
+	var saw_track = await _poll_until(_room2, func():
 		var remotes = _room2.get_remote_participants()
 		for key in remotes:
 			var rp = remotes[key]
@@ -54,7 +54,7 @@ func test_connect_publish_subscribe_disconnect():
 	lp.publish_data(test_data, true, PackedStringArray(), test_topic)
 
 	# Step 5: Verify Room2 receives it
-	var received = _poll_until(_room2, func():
+	var received = await _poll_until(_room2, func():
 		return _data_received.size() > 0, 10.0)
 	if received:
 		assert_eq(_data_received, test_data, "Received data should match sent data")
@@ -65,9 +65,9 @@ func test_connect_publish_subscribe_disconnect():
 	# Step 6: Both disconnect cleanly
 	_room.disconnect_from_room()
 	_room2.disconnect_from_room()
-	var r1_disconnected = _poll_until(_room, func():
+	var r1_disconnected = await _poll_until(_room, func():
 		return _room.get_connection_state() == LiveKitRoom.STATE_DISCONNECTED)
-	var r2_disconnected = _poll_until(_room2, func():
+	var r2_disconnected = await _poll_until(_room2, func():
 		return _room2.get_connection_state() == LiveKitRoom.STATE_DISCONNECTED)
 	assert_true(r1_disconnected, "Room1 should disconnect cleanly")
 	assert_true(r2_disconnected, "Room2 should disconnect cleanly")
@@ -78,7 +78,7 @@ func test_room_properties_after_connect():
 		return
 
 	_room.connect_to_room(_livekit_url, _token_1, {})
-	var connected = _poll_until(_room, func():
+	var connected = await _poll_until(_room, func():
 		return _room.get_connection_state() == LiveKitRoom.STATE_CONNECTED, 15.0)
 	assert_true(connected, "Room should connect")
 	if not connected:
@@ -101,7 +101,7 @@ func test_reconnect_preserves_functionality():
 
 	# First connection
 	_room.connect_to_room(_livekit_url, _token_1, {})
-	var connected = _poll_until(_room, func():
+	var connected = await _poll_until(_room, func():
 		return _room.get_connection_state() == LiveKitRoom.STATE_CONNECTED, 15.0)
 	assert_true(connected, "First connect should succeed")
 	if not connected:
@@ -109,13 +109,13 @@ func test_reconnect_preserves_functionality():
 
 	# Disconnect
 	_room.disconnect_from_room()
-	var disconnected = _poll_until(_room, func():
+	var disconnected = await _poll_until(_room, func():
 		return _room.get_connection_state() == LiveKitRoom.STATE_DISCONNECTED, 10.0)
 	assert_true(disconnected, "Should disconnect")
 
 	# Reconnect
 	_room.connect_to_room(_livekit_url, _token_1, {})
-	var reconnected = _poll_until(_room, func():
+	var reconnected = await _poll_until(_room, func():
 		return _room.get_connection_state() == LiveKitRoom.STATE_CONNECTED, 15.0)
 	assert_true(reconnected, "Reconnect should succeed")
 	if not reconnected:
@@ -127,6 +127,6 @@ func test_reconnect_preserves_functionality():
 	var lp = _room.get_local_participant()
 	assert_not_null(lp, "Local participant should exist after reconnect")
 	lp.publish_track(track, {})
-	var published = _poll_until(_room, func():
+	var published = await _poll_until(_room, func():
 		return lp.get_track_publications().size() > 0, 10.0)
 	assert_true(published, "Track publish should work after reconnect")

@@ -41,6 +41,9 @@ jobs:
             os-name: Android (arm64)
             platform: android
             arch: arm64
+          - os: ubuntu-latest
+            os-name: Web
+            platform: web
 
     steps:
       - name: Checkout repository
@@ -66,6 +69,13 @@ jobs:
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r26d
+
+      - name: Set up Emscripten
+        if: matrix.platform == 'web'
+        uses: mymindstorm/setup-emsdk@v16
+        with:
+          # Godot's web templates require extensions built with a matching Emscripten.
+          version: "4.0.11"
 
       - name: Export NDK path
         if: matrix.platform == 'android'

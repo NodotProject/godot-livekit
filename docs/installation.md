@@ -14,6 +14,7 @@ To build the extension from source, you will need:
 - **Linux:** `g++`, `curl`, `tar`, `unzip`
 - **macOS:** Xcode Command Line Tools, `curl`, `tar`, `unzip`
 - **Windows:** MSVC (Visual Studio Build Tools) or MinGW-w64 (if cross-compiling from Linux/macOS)
+- **Web:** `emcc` from [emsdk](https://emscripten.org), at the version Godot's web templates were built with (4.0.11 for Godot 4.5), plus `curl` and `tar`
 
 ## Building from Source
 
@@ -39,8 +40,22 @@ This repository includes a custom `build.sh` script that automatically fetches t
      ```bash
      ./build.sh windows
      ```
+   - **Web:**
+     ```bash
+     ./build.sh web
+     ```
 
 Once the build is complete, the compiled dynamic libraries (`.so`, `.dylib`, or `.dll`) and the LiveKit shared libraries will be placed in the `addons/godot-livekit/bin/` directory.
+
+## Web
+
+Web exports use a separate build of the extension that implements the same classes on top of [livekit-client](https://github.com/livekit/client-sdk-js), which is embedded in it. Web support is in progress. So far it covers rooms, participants, track publications, data messages, and audio (sources, local audio tracks and streams). Classes that aren't available yet (such as video sources and streams) aren't registered on the web, so `ClassDB.class_exists()` reports them as missing.
+
+To export for the web:
+
+- Enable **Extensions Support** in the Web export preset, and leave **Thread Support** off. The web build is single-threaded, like Godot's default web templates.
+- Audio runs on the browser's `AudioContext`, which browsers only start after a user gesture (a click or key press). Audio sources are resampled to its rate, so they needn't use 10ms frames as they do natively.
+- LiveKit events are delivered by the browser between frames, so wait for them by yielding (e.g. `await get_tree().process_frame`), not with blocking loops like `OS.delay_msec()`.
 
 ## Installation in Godot
 

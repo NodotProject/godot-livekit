@@ -122,7 +122,7 @@ func test_event_queue_buildup_then_drain():
 		room.connect_to_room("ws://127.0.0.1:1", "invalid-token", {})
 		rooms.append(room)
 	# Let events accumulate briefly
-	OS.delay_msec(50)
+	await get_tree().create_timer(0.05).timeout
 	# Drain all at once
 	for room in rooms:
 		room.poll_events()

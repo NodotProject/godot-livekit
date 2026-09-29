@@ -33,6 +33,17 @@ func test_all_classes_registered():
 		"LiveKitScreenCapture",
 	]
 
+	if OS.has_feature("web"):
+		# Not implemented on the web yet.
+		for cls in [
+			"LiveKitLocalVideoTrack",
+			"LiveKitVideoStream",
+			"LiveKitVideoSource",
+			"LiveKitAudioProcessingModule",
+			"LiveKitScreenCapture",
+		]:
+			classes.erase(cls)
+
 	for cls in classes:
 		assert_true(ClassDB.class_exists(cls),
 			"Class '%s' should be registered in ClassDB" % cls)
