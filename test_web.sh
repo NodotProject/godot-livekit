@@ -18,6 +18,8 @@ NC='\033[0m' # No Color
 
 # Unit tests for classes the web build implements.
 WEB_UNIT_TESTS=(
+    test_audio_source
+    test_audio_stream
     test_connection_timeout
     test_disconnect_hang
     test_participant
@@ -29,7 +31,7 @@ WEB_UNIT_TESTS=(
 )
 # Tests that need a server. Their environment variables are passed through the page URL.
 WEB_INTEGRATION_TESTS=(test_connection test_data_channel test_participants)
-WEB_E2E_TESTS=(test_data_messaging test_multi_participant)
+WEB_E2E_TESTS=(test_audio_flow test_data_messaging test_full_session test_multi_participant)
 PASSTHROUGH_ENV=(LIVEKIT_TEST_URL LIVEKIT_TOKEN_1 LIVEKIT_TOKEN_2 RUN_E2E LIVEKIT_E2E_URL LIVEKIT_E2E_ROOM LIVEKIT_API_KEY LIVEKIT_API_SECRET)
 TIMEOUT_SEC="${WEB_TEST_TIMEOUT:-300}"
 PORT="${WEB_TEST_PORT:-8060}"

@@ -39,6 +39,7 @@ protected:
 
 public:
     void bind_web_participant(int p_room_js_id, const String &p_identity, bool p_local);
+    int get_room_js_id() const { return room_js_id_; }
 
     String get_sid() const;
     String get_name() const;

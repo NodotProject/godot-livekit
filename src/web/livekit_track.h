@@ -58,6 +58,20 @@ public:
     void request_stats();
 };
 
+class LiveKitAudioSource;
+
+class LiveKitLocalAudioTrack : public LiveKitTrack {
+    GDCLASS(LiveKitLocalAudioTrack, LiveKitTrack)
+
+protected:
+    static void _bind_methods();
+
+public:
+    static Ref<LiveKitLocalAudioTrack> create(const String &name, const Ref<LiveKitAudioSource> &source);
+    void mute();
+    void unmute();
+};
+
 class LiveKitRemoteAudioTrack : public LiveKitTrack {
     GDCLASS(LiveKitRemoteAudioTrack, LiveKitTrack)
 

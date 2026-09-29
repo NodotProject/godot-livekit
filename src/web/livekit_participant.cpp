@@ -162,9 +162,18 @@ Dictionary LiveKitLocalParticipant::get_track_publications() const {
     return _publications();
 }
 
+// livekit-client publishes asynchronously, so the returned publication's sid stays empty until
+// publishing completes (signaled by the room's local_track_published).
 Ref<LiveKitLocalTrackPublication> LiveKitLocalParticipant::publish_track(const Ref<LiveKitTrack> &track, const Dictionary &options) {
-    UtilityFunctions::push_error("LiveKitLocalParticipant::publish_track: not yet supported on the web");
-    return Ref<LiveKitLocalTrackPublication>();
+    if (!room_js_id_ || track.is_null() || !track->get_js_id()) {
+        UtilityFunctions::push_error("LiveKitLocalParticipant::publish_track: invalid arguments");
+        return Ref<LiveKitLocalTrackPublication>();
+    }
+    Dictionary info = web_call_dict("local_publish_track", Array::make(room_js_id_, track->get_js_id(), options));
+    if (info.is_empty()) {
+        return Ref<LiveKitLocalTrackPublication>();
+    }
+    return LiveKitTrackPublication::from_info(info, false);
 }
 
 void LiveKitLocalParticipant::unpublish_track(const String &track_sid) {

@@ -1,5 +1,6 @@
 #include "livekit_track.h"
 
+#include "livekit_audio_source.h"
 #include "web_bridge.h"
 
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -47,6 +48,8 @@ Ref<LiveKitTrack> LiveKitTrack::from_info(const Dictionary &p_info, bool p_remot
         track = Ref<LiveKitTrack>(memnew(LiveKitRemoteAudioTrack));
     } else if (p_remote && kind == KIND_VIDEO) {
         track = Ref<LiveKitTrack>(memnew(LiveKitRemoteVideoTrack));
+    } else if (!p_remote && kind == KIND_AUDIO) {
+        track = Ref<LiveKitTrack>(memnew(LiveKitLocalAudioTrack));
     } else {
         track.instantiate();
     }
@@ -91,4 +94,36 @@ int LiveKitTrack::get_stream_state() const {
 
 void LiveKitTrack::request_stats() {
     UtilityFunctions::push_error("LiveKitTrack::request_stats: not yet supported on the web");
+}
+
+// LiveKitLocalAudioTrack
+
+void LiveKitLocalAudioTrack::_bind_methods() {
+    ClassDB::bind_static_method("LiveKitLocalAudioTrack", D_METHOD("create", "name", "source"), &LiveKitLocalAudioTrack::create);
+    ClassDB::bind_method(D_METHOD("mute"), &LiveKitLocalAudioTrack::mute);
+    ClassDB::bind_method(D_METHOD("unmute"), &LiveKitLocalAudioTrack::unmute);
+}
+
+Ref<LiveKitLocalAudioTrack> LiveKitLocalAudioTrack::create(const String &name, const Ref<LiveKitAudioSource> &source) {
+    if (source.is_null()) {
+        UtilityFunctions::push_error("LiveKitLocalAudioTrack::create: source is null");
+        return Ref<LiveKitLocalAudioTrack>();
+    }
+    Dictionary info = web_call_dict("local_audio_track_create", Array::make(source->get_js_id(), name));
+    if (info.is_empty()) {
+        return Ref<LiveKitLocalAudioTrack>();
+    }
+    return LiveKitTrack::from_info(info, false);
+}
+
+void LiveKitLocalAudioTrack::mute() {
+    if (js_id_) {
+        web_call("track_set_muted", Array::make(js_id_, true));
+    }
+}
+
+void LiveKitLocalAudioTrack::unmute() {
+    if (js_id_) {
+        web_call("track_set_muted", Array::make(js_id_, false));
+    }
 }
