@@ -13,6 +13,10 @@ if not platform:
     else:
         platform = 'linux'
 
+if platform == 'web':
+    print("Web builds use SConstruct.web: run `./build.sh web` or `scons -f SConstruct.web platform=web`.")
+    Exit(1)
+
 target = ARGUMENTS.get('target', 'template_release')
 if platform == 'android':
     arch = ARGUMENTS.get('arch', 'arm64')
