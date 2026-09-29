@@ -105,3 +105,94 @@ jobs:
         name: test-results-${{ matrix.os-name }}-${{ matrix.arch || matrix.platform }}
         path: test_results.xml
         if-no-files-found: ignore
+
+  web:
+    name: Build and Test for Web
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: "4.5"
+      # Godot's web templates require extensions built with a matching Emscripten.
+      EMSCRIPTEN_VERSION: "4.0.11"
+      LIVEKIT_SERVER_VERSION: "1.13.7"
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.x"
+
+    - name: Install SCons
+      run: pip install scons
+
+    - name: Set up Emscripten
+      uses: mymindstorm/setup-emsdk@v16
+      with:
+        version: ${{ env.EMSCRIPTEN_VERSION }}
+
+    - name: Cache dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          godot-cpp
+        key: deps-web-${{ env.EMSCRIPTEN_VERSION }}-${{ hashFiles('build.sh') }}
+
+    - name: Build GDExtension
+      run: ./build.sh web
+
+    - name: Cache Godot and export templates
+      id: cache-godot
+      uses: actions/cache@v4
+      with:
+        path: |
+          godot
+          ~/.local/share/godot/export_templates
+        key: godot-${{ env.GODOT_VERSION }}-web-templates
+
+    - name: Download Godot and web export templates
+      if: steps.cache-godot.outputs.cache-hit != 'true'
+      run: |
+        wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+        unzip -q Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+        mv Godot_v${GODOT_VERSION}-stable_linux.x86_64 godot
+        chmod +x godot
+        wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+        templates=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+        mkdir -p "$templates"
+        unzip -q -j Godot_v${GODOT_VERSION}-stable_export_templates.tpz 'templates/web_*' 'templates/version.txt' -d "$templates"
+
+    - name: Install GUT
+      run: |
+        git clone --depth 1 --branch v9.5.0 https://github.com/bitwes/Gut.git /tmp/gut
+        mkdir -p addons
+        cp -r /tmp/gut/addons/gut addons/gut
+
+    - name: Start LiveKit server
+      run: |
+        wget -q https://github.com/livekit/livekit/releases/download/v${LIVEKIT_SERVER_VERSION}/livekit_${LIVEKIT_SERVER_VERSION}_linux_amd64.tar.gz
+        tar -xzf livekit_${LIVEKIT_SERVER_VERSION}_linux_amd64.tar.gz livekit-server
+        ./livekit-server --dev --bind 127.0.0.1 > livekit-server.log 2>&1 &
+
+    - name: Run tests
+      run: |
+        # Join tokens for the integration tests, signed with the dev server's key.
+        token() {
+          python3 - "$1" <<'PY'
+        import base64, hashlib, hmac, json, sys, time
+        def b64(b): return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+        now = int(time.time())
+        claims = {"iss": "devkey", "sub": sys.argv[1], "iat": now, "nbf": now, "exp": now + 3600,
+                  "video": {"room": "web-integration", "roomJoin": True, "canPublish": True,
+                            "canSubscribe": True, "canPublishData": True}}
+        signing = b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()) + "." + b64(json.dumps(claims).encode())
+        print(signing + "." + b64(hmac.new(b"secret", signing.encode(), hashlib.sha256).digest()))
+        PY
+        }
+        export LIVEKIT_TEST_URL=ws://127.0.0.1:7880
+        export LIVEKIT_TOKEN_1=$(token web-user-1)
+        export LIVEKIT_TOKEN_2=$(token web-user-2)
+        export RUN_E2E=1
+        export LIVEKIT_E2E_URL=ws://127.0.0.1:7880
+        ./test_web.sh

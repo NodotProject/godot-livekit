@@ -15,7 +15,7 @@
 - **End-to-End Encryption (E2EE)**: Secure your media streams with configurable encryption, key management, and per-participant frame cryptors.
 - **Connection Statistics**: Access detailed WebRTC statistics including inbound/outbound RTP, codecs, transport, and candidate pair metrics.
 - **Fast Build Times**: Uses prebuilt binaries for both `godot-cpp` and the LiveKit C++ SDK, reducing compilation time to seconds instead of hours.
-- **Cross-Platform**: Supports Linux, macOS (Universal), and Windows.
+- **Cross-Platform**: Supports Linux, macOS (Universal), and Windows, with Web support in progress.
 - **Native GDExtension**: Works out-of-the-box with Godot 4.5 without requiring custom engine builds.
 
 ## Prerequisites
@@ -30,6 +30,7 @@ To build the extension from source, you will need:
 - **Linux:** `g++`, `curl`, `tar`, `unzip`
 - **macOS:** Xcode Command Line Tools, `curl`, `tar`, `unzip`
 - **Windows:** MSVC (Visual Studio Build Tools) or MinGW-w64 (if cross-compiling from Linux/macOS)
+- **Web:** `emcc` from [emsdk](https://emscripten.org), at the version Godot's web templates were built with (4.0.11 for Godot 4.5), plus `curl` and `tar`
 
 ## Building from Source
 
@@ -54,6 +55,10 @@ This repository includes a custom `build.sh` script that automatically fetches t
    - **Windows:**
      ```bash
      ./build.sh windows
+     ```
+   - **Web:**
+     ```bash
+     ./build.sh web
      ```
 
 Once the build is complete, the compiled dynamic libraries (`.so`, `.dylib`, or `.dll`) and the LiveKit shared libraries will be placed in the `addons/godot-livekit/bin/` directory.
@@ -108,6 +113,15 @@ func _on_frame():
     # Feed into a LiveKitVideoSource for screen sharing
 ```
 
+## Web
+
+Web exports use a separate build of the extension that implements the same classes on top of [livekit-client](https://github.com/livekit/client-sdk-js), which is embedded in it. Web support is in progress. So far it covers rooms, participants, track publications and data messages. Classes that aren't available yet (such as audio and video sources) aren't registered on the web, so `ClassDB.class_exists()` reports them as missing.
+
+To export for the web:
+
+- Enable **Extensions Support** in the Web export preset, and leave **Thread Support** off. The web build is single-threaded, like Godot's default web templates.
+- LiveKit events are delivered by the browser between frames, so wait for them by yielding (e.g. `await get_tree().process_frame`), not with blocking loops like `OS.delay_msec()`.
+
 ## Running Tests
 
 If you have [GUT (Godot Unit Test)](https://github.com/bitwes/Gut) installed in `addons/gut`, you can run the test suite using the provided `test.sh` script:
@@ -115,6 +129,8 @@ If you have [GUT (Godot Unit Test)](https://github.com/bitwes/Gut) installed in 
 ```bash
 ./test.sh
 ```
+
+`./test_web.sh` runs the tests that apply to the web build in headless Chrome. It requires a web build, Godot's web export templates, and `google-chrome`.
 
 ## Continuous Integration
 
