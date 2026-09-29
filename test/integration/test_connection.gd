@@ -18,16 +18,13 @@ func test_connect_emits_connected():
 func test_invalid_token_emits_connection_failed():
 	if _skip_if_no_server():
 		return
-	var failed := false
-	var fail_error := ""
-	_room.connection_failed.connect(func(err: String):
-		failed = true
-		fail_error = err
+	# An Array so the lambda can mutate shared state (lambdas capture locals by value).
+	var state := [false]  # [failed]
+	_room.connection_failed.connect(func(_err: String):
+		state[0] = true
 	)
 	_room.connect_to_room(_livekit_url, "clearly-invalid-token", {})
-	var done = await _poll_until(_room, func():
-		return failed or _room.get_connection_state() == LiveKitRoom.STATE_DISCONNECTED, 10.0)
-	assert_true(done, "Room should fail with invalid token")
+	var failed = await _poll_until(_room, func(): return state[0], 10.0)
 	assert_true(failed, "connection_failed signal should fire with invalid token")
 	assert_eq(_room.get_connection_state(), LiveKitRoom.STATE_DISCONNECTED,
 		"Room should be STATE_DISCONNECTED after connection_failed")
