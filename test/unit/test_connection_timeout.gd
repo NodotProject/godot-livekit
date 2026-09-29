@@ -4,8 +4,9 @@ extends GutTest
 const FRAME_BUDGET_MS := 500
 
 # Use 192.0.2.1 (TEST-NET, RFC 5737) — guaranteed unroutable, so Connect()
-# will hang until the timeout fires rather than failing instantly.
-const UNROUTABLE := "ws://192.0.2.1:1"
+# will hang until the timeout fires rather than failing instantly. (The port
+# must not be one browsers refuse outright, like 1.)
+const UNROUTABLE := "ws://192.0.2.1:7880"
 
 
 func test_connection_failed_signal_exists():
