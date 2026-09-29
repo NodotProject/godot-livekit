@@ -18,7 +18,7 @@ func _poll_capture_frame(capture, timeout_sec: float = 10.0) -> bool:
 		capture.poll()
 		if capture.get_image() != null:
 			return true
-		OS.delay_msec(50)
+		await get_tree().create_timer(0.05).timeout
 	return false
 
 
@@ -28,7 +28,7 @@ func _feed_frames(capture, source, count: int) -> void:
 		var img = capture.get_image()
 		if img != null:
 			source.capture_frame(img, Time.get_ticks_usec(), 0)
-		OS.delay_msec(16)
+		await get_tree().create_timer(0.016).timeout
 
 
 func _get_remote_track_publications(room: LiveKitRoom) -> Array:
@@ -58,7 +58,7 @@ func test_capture_produces_frames():
 	capture.set_auto_poll(false)
 	capture.start()
 
-	var got_frame = _poll_capture_frame(capture, 10.0)
+	var got_frame = await _poll_capture_frame(capture, 10.0)
 	assert_true(got_frame, "Capture should produce at least one frame")
 
 	if got_frame:
@@ -95,7 +95,7 @@ func test_capture_publish_as_video_track():
 	if _skip_if_no_display():
 		return
 
-	var both = _connect_both_rooms()
+	var both = await _connect_both_rooms()
 	assert_true(both, "Both rooms should connect")
 	if not both:
 		return
@@ -109,7 +109,7 @@ func test_capture_publish_as_video_track():
 	capture.start()
 
 	# Wait for first frame so we know dimensions
-	var got_frame = _poll_capture_frame(capture, 10.0)
+	var got_frame = await _poll_capture_frame(capture, 10.0)
 	assert_true(got_frame, "Capture should produce a frame before publishing")
 	if not got_frame:
 		capture.close()
@@ -124,10 +124,10 @@ func test_capture_publish_as_video_track():
 	lp.publish_track(track, {})
 
 	# Feed some frames so the track has content
-	_feed_frames(capture, source, 10)
+	await _feed_frames(capture, source, 10)
 
 	# Room2 sees remote track publication with KIND_VIDEO
-	var saw_video = _poll_until(_room2, func():
+	var saw_video = await _poll_until(_room2, func():
 		var pubs = _get_remote_track_publications(_room2)
 		for pub in pubs:
 			if pub.get_kind() == LiveKitTrack.KIND_VIDEO:
@@ -151,7 +151,7 @@ func test_capture_pause_resume():
 	capture.start()
 
 	# Wait for first frame
-	var got_frame = _poll_capture_frame(capture, 10.0)
+	var got_frame = await _poll_capture_frame(capture, 10.0)
 	assert_true(got_frame, "Capture should produce at least one frame")
 	if not got_frame:
 		capture.close()
@@ -168,7 +168,7 @@ func test_capture_pause_resume():
 	# Verify frames still arrive after resume
 	# Clear current image state by polling any pending, then wait for new
 	capture.poll()
-	var got_frame_after = _poll_capture_frame(capture, 10.0)
+	var got_frame_after = await _poll_capture_frame(capture, 10.0)
 	assert_true(got_frame_after, "Capture should produce frames after resume")
 
 	capture.close()
@@ -192,7 +192,7 @@ func test_monitor_capture():
 	capture.set_auto_poll(false)
 	capture.start()
 
-	var got_frame = _poll_capture_frame(capture, 10.0)
+	var got_frame = await _poll_capture_frame(capture, 10.0)
 	assert_true(got_frame, "Monitor capture should produce at least one frame")
 
 	if got_frame:
@@ -225,7 +225,7 @@ func test_capture_lifecycle_cleanup():
 
 	# Connect room1 only
 	_room.connect_to_room(_livekit_url, _token_1, {})
-	var connected = _poll_until(_room, func():
+	var connected = await _poll_until(_room, func():
 		return _room.get_connection_state() == LiveKitRoom.STATE_CONNECTED, 15.0)
 	assert_true(connected, "Room should connect")
 	if not connected:
@@ -239,7 +239,7 @@ func test_capture_lifecycle_cleanup():
 	capture.set_auto_poll(false)
 	capture.start()
 
-	var got_frame = _poll_capture_frame(capture, 10.0)
+	var got_frame = await _poll_capture_frame(capture, 10.0)
 	assert_true(got_frame, "Capture should produce a frame")
 	if not got_frame:
 		capture.close()
@@ -253,10 +253,10 @@ func test_capture_lifecycle_cleanup():
 	lp.publish_track(track, {})
 
 	# Feed a few frames
-	_feed_frames(capture, source, 5)
+	await _feed_frames(capture, source, 5)
 
 	# Wait for publication
-	var published = _poll_until(_room, func():
+	var published = await _poll_until(_room, func():
 		return lp.get_track_publications().size() > 0, 10.0)
 	assert_true(published, "Track should be published")
 
@@ -271,7 +271,7 @@ func test_capture_lifecycle_cleanup():
 	capture.close()
 
 	# Verify publications are gone
-	var unpublished = _poll_until(_room, func():
+	var unpublished = await _poll_until(_room, func():
 		return lp.get_track_publications().size() == 0, 10.0)
 	assert_true(unpublished, "Publications should be empty after cleanup")
 

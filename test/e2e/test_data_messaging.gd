@@ -23,7 +23,7 @@ func test_reliable_data_round_trip():
 	if _skip_if_no_server():
 		return
 
-	var both = _connect_both_rooms()
+	var both = await _connect_both_rooms()
 	assert_true(both, "Both rooms should connect")
 	if not both:
 		return
@@ -35,7 +35,7 @@ func test_reliable_data_round_trip():
 	var lp = _room.get_local_participant()
 	lp.publish_data(test_data, true, PackedStringArray(), test_topic)
 
-	var received = _poll_until(_room2, func():
+	var received = await _poll_until(_room2, func():
 		return _received_data.size() > 0, 10.0)
 	assert_true(received, "Room2 should receive reliable data")
 
@@ -48,7 +48,7 @@ func test_multiple_topics():
 	if _skip_if_no_server():
 		return
 
-	var both = _connect_both_rooms()
+	var both = await _connect_both_rooms()
 	assert_true(both, "Both rooms should connect")
 	if not both:
 		return
@@ -63,12 +63,12 @@ func test_multiple_topics():
 	lp.publish_data(data_a, true, PackedStringArray(), "topic_a")
 
 	# Small delay between sends to ensure ordering
-	_poll_until(_room, func(): return false, 0.5)
+	await _poll_until(_room, func(): return false, 0.5)
 
 	lp.publish_data(data_b, true, PackedStringArray(), "topic_b")
 
 	# Wait for both messages
-	var got_both = _poll_until(_room2, func():
+	var got_both = await _poll_until(_room2, func():
 		return _received_messages.size() >= 2, 10.0)
 
 	if got_both:
@@ -94,7 +94,7 @@ func test_large_payload():
 	if _skip_if_no_server():
 		return
 
-	var both = _connect_both_rooms()
+	var both = await _connect_both_rooms()
 	assert_true(both, "Both rooms should connect")
 	if not both:
 		return
@@ -110,7 +110,7 @@ func test_large_payload():
 	var lp = _room.get_local_participant()
 	lp.publish_data(large_data, true, PackedStringArray(), "large_payload")
 
-	var received = _poll_until(_room2, func():
+	var received = await _poll_until(_room2, func():
 		return _received_data.size() > 0, 10.0)
 	assert_true(received, "Room2 should receive large payload")
 
