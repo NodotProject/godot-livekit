@@ -12,7 +12,7 @@ func before_each():
 	_data_topic = ""
 
 
-func _on_data_received(data: PackedByteArray, _participant, topic: String):
+func _on_data_received(data: PackedByteArray, _participant, _kind: int, topic: String):
 	_data_received = data
 	_data_topic = topic
 

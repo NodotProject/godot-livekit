@@ -13,7 +13,7 @@ func before_each():
 	_received_messages = []
 
 
-func _on_data_received(data: PackedByteArray, _participant, topic: String):
+func _on_data_received(data: PackedByteArray, _participant, _kind: int, topic: String):
 	_received_data = data
 	_received_topic = topic
 	_received_messages.append({"data": data, "topic": topic})

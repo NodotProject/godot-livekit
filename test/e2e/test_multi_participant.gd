@@ -15,12 +15,12 @@ func before_each():
 	_r2_data_topic = ""
 
 
-func _on_r1_data_received(data: PackedByteArray, _participant, topic: String):
+func _on_r1_data_received(data: PackedByteArray, _participant, _kind: int, topic: String):
 	_r1_data_received = data
 	_r1_data_topic = topic
 
 
-func _on_r2_data_received(data: PackedByteArray, _participant, topic: String):
+func _on_r2_data_received(data: PackedByteArray, _participant, _kind: int, topic: String):
 	_r2_data_received = data
 	_r2_data_topic = topic
 

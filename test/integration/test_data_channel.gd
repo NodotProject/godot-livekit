@@ -33,7 +33,7 @@ func _connect_both_rooms():
 		return _room.get_remote_participants().size() == 1, 10.0)
 
 
-func _on_data_received(data: PackedByteArray, _participant, topic: String):
+func _on_data_received(data: PackedByteArray, _participant, _kind: int, topic: String):
 	_received_data = data
 	_received_topic = topic
 
