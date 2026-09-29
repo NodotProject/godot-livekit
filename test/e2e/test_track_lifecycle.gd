@@ -17,7 +17,7 @@ func test_audio_publish_and_remote_subscribe():
 	if _skip_if_no_server():
 		return
 
-	var both = _connect_both_rooms()
+	var both = await _connect_both_rooms()
 	assert_true(both, "Both rooms should connect")
 	if not both:
 		return
@@ -30,7 +30,7 @@ func test_audio_publish_and_remote_subscribe():
 	lp.publish_track(track, {})
 
 	# Room2 sees remote track publication with KIND_AUDIO
-	var saw_audio = _poll_until(_room2, func():
+	var saw_audio = await _poll_until(_room2, func():
 		var pubs = _get_remote_track_publications(_room2)
 		for pub in pubs:
 			if pub.get_kind() == LiveKitTrack.KIND_AUDIO:
@@ -52,7 +52,7 @@ func test_video_publish_and_remote_subscribe():
 	if _skip_if_no_server():
 		return
 
-	var both = _connect_both_rooms()
+	var both = await _connect_both_rooms()
 	assert_true(both, "Both rooms should connect")
 	if not both:
 		return
@@ -65,7 +65,7 @@ func test_video_publish_and_remote_subscribe():
 	lp.publish_track(track, {})
 
 	# Room2 sees remote track publication
-	var saw_video = _poll_until(_room2, func():
+	var saw_video = await _poll_until(_room2, func():
 		var pubs = _get_remote_track_publications(_room2)
 		for pub in pubs:
 			if pub.get_kind() == LiveKitTrack.KIND_VIDEO:
@@ -78,7 +78,7 @@ func test_publish_unpublish_cycle():
 	if _skip_if_no_server():
 		return
 
-	var both = _connect_both_rooms()
+	var both = await _connect_both_rooms()
 	assert_true(both, "Both rooms should connect")
 	if not both:
 		return
@@ -89,12 +89,12 @@ func test_publish_unpublish_cycle():
 	var lp = _room.get_local_participant()
 	lp.publish_track(track, {})
 
-	var published = _poll_until(_room, func():
+	var published = await _poll_until(_room, func():
 		return lp.get_track_publications().size() > 0, 10.0)
 	assert_true(published, "Track should be published")
 
 	# Wait for remote to see it
-	var remote_saw = _poll_until(_room2, func():
+	var remote_saw = await _poll_until(_room2, func():
 		return _get_remote_track_publications(_room2).size() > 0, 15.0)
 	assert_true(remote_saw, "Room2 should see the track")
 
@@ -104,12 +104,12 @@ func test_publish_unpublish_cycle():
 		var sid = pubs.keys()[0]
 		lp.unpublish_track(sid)
 
-	var unpublished = _poll_until(_room, func():
+	var unpublished = await _poll_until(_room, func():
 		return lp.get_track_publications().size() == 0, 10.0)
 	assert_true(unpublished, "Track should be unpublished locally")
 
 	# Verify remote sees removal
-	var remote_gone = _poll_until(_room2, func():
+	var remote_gone = await _poll_until(_room2, func():
 		return _get_remote_track_publications(_room2).size() == 0, 15.0)
 	assert_true(remote_gone, "Room2 should see track removed")
 
@@ -118,7 +118,7 @@ func test_multiple_tracks():
 	if _skip_if_no_server():
 		return
 
-	var both = _connect_both_rooms()
+	var both = await _connect_both_rooms()
 	assert_true(both, "Both rooms should connect")
 	if not both:
 		return
@@ -136,12 +136,12 @@ func test_multiple_tracks():
 	lp.publish_track(video_track, {})
 
 	# Wait for both publications locally
-	var both_local = _poll_until(_room, func():
+	var both_local = await _poll_until(_room, func():
 		return lp.get_track_publications().size() >= 2, 10.0)
 	assert_true(both_local, "Should have 2 local publications")
 
 	# Wait for Room2 to see both
-	var both_remote = _poll_until(_room2, func():
+	var both_remote = await _poll_until(_room2, func():
 		return _get_remote_track_publications(_room2).size() >= 2, 15.0)
 	assert_true(both_remote, "Room2 should see both tracks from Room1")
 

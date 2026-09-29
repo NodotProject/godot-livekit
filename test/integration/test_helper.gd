@@ -57,5 +57,5 @@ func _poll_until(room: LiveKitRoom, condition: Callable, timeout_sec: float = 5.
 		room.poll_events()
 		if condition.call():
 			return true
-		OS.delay_msec(50)
+		await get_tree().create_timer(0.05).timeout
 	return false
