@@ -15,12 +15,12 @@ func before_each():
 	_r2_data_topic = ""
 
 
-func _on_r1_data_received(data: PackedByteArray, _participant, topic: String):
+func _on_r1_data_received(data: PackedByteArray, _participant, _kind: int, topic: String):
 	_r1_data_received = data
 	_r1_data_topic = topic
 
 
-func _on_r2_data_received(data: PackedByteArray, _participant, topic: String):
+func _on_r2_data_received(data: PackedByteArray, _participant, _kind: int, topic: String):
 	_r2_data_received = data
 	_r2_data_topic = topic
 
@@ -31,7 +31,7 @@ func test_participant_visibility():
 
 	# Room1 connects first
 	_room.connect_to_room(_livekit_url, _token_1, {})
-	var r1_connected = _poll_until(_room, func():
+	var r1_connected = await _poll_until(_room, func():
 		return _room.get_connection_state() == LiveKitRoom.STATE_CONNECTED, 15.0)
 	assert_true(r1_connected, "Room1 should connect")
 	if not r1_connected:
@@ -39,17 +39,17 @@ func test_participant_visibility():
 
 	# Room2 joins — Room1 should see it
 	_room2.connect_to_room(_livekit_url, _token_2, {})
-	var r2_connected = _poll_until(_room2, func():
+	var r2_connected = await _poll_until(_room2, func():
 		return _room2.get_connection_state() == LiveKitRoom.STATE_CONNECTED, 15.0)
 	assert_true(r2_connected, "Room2 should connect")
 
-	var saw_remote = _poll_until(_room, func():
+	var saw_remote = await _poll_until(_room, func():
 		return _room.get_remote_participants().size() == 1, 15.0)
 	assert_true(saw_remote, "Room1 should see one remote participant")
 
 	# Room2 disconnects — Room1 should see empty remotes
 	_room2.disconnect_from_room()
-	var saw_empty = _poll_until(_room, func():
+	var saw_empty = await _poll_until(_room, func():
 		return _room.get_remote_participants().size() == 0, 15.0)
 	assert_true(saw_empty, "Room1 should see zero remotes after Room2 disconnects")
 
@@ -58,7 +58,7 @@ func test_bidirectional_data():
 	if _skip_if_no_server():
 		return
 
-	var both = _connect_both_rooms()
+	var both = await _connect_both_rooms()
 	assert_true(both, "Both rooms should connect and see each other")
 	if not both:
 		return
@@ -71,7 +71,7 @@ func test_bidirectional_data():
 	var lp1 = _room.get_local_participant()
 	lp1.publish_data(data_1to2, true, PackedStringArray(), "r1_topic")
 
-	var r2_received = _poll_both(func():
+	var r2_received = await _poll_both(func():
 		return _r2_data_received.size() > 0, 10.0)
 
 	# Room2 sends data to Room1
@@ -79,7 +79,7 @@ func test_bidirectional_data():
 	var lp2 = _room2.get_local_participant()
 	lp2.publish_data(data_2to1, true, PackedStringArray(), "r2_topic")
 
-	var r1_received = _poll_both(func():
+	var r1_received = await _poll_both(func():
 		return _r1_data_received.size() > 0, 10.0)
 
 	if r2_received:
@@ -102,7 +102,7 @@ func test_participant_properties():
 	if _skip_if_no_server():
 		return
 
-	var both = _connect_both_rooms()
+	var both = await _connect_both_rooms()
 	assert_true(both, "Both rooms should connect and see each other")
 	if not both:
 		return

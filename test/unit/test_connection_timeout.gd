@@ -42,7 +42,7 @@ func test_timeout_emits_connection_failed():
 	var deadline := Time.get_ticks_msec() + 3000
 	while Time.get_ticks_msec() < deadline and not state[0]:
 		room.poll_events()
-		OS.delay_msec(50)
+		await get_tree().create_timer(0.05).timeout
 
 	assert_true(state[0], "connection_failed should fire after timeout")
 	assert_string_contains(state[1], "timed out",
@@ -66,7 +66,7 @@ func test_timeout_does_not_fire_when_disconnected_first():
 	var deadline := Time.get_ticks_msec() + 2000
 	while Time.get_ticks_msec() < deadline:
 		room.poll_events()
-		OS.delay_msec(50)
+		await get_tree().create_timer(0.05).timeout
 
 	assert_false(state[0],
 		"connection_failed should not fire after explicit disconnect")
@@ -84,13 +84,13 @@ func test_poll_events_after_timeout_does_not_double_emit():
 	var deadline := Time.get_ticks_msec() + 3000
 	while Time.get_ticks_msec() < deadline and state[0] == 0:
 		room.poll_events()
-		OS.delay_msec(50)
+		await get_tree().create_timer(0.05).timeout
 	assert_eq(state[0], 1, "Should have received exactly one connection_failed")
 
 	# Keep polling — the late _finalize_connection should be suppressed.
 	for i in range(20):
 		room.poll_events()
-		OS.delay_msec(50)
+		await get_tree().create_timer(0.05).timeout
 
 	assert_eq(state[0], 1,
 		"connection_failed should not fire again after timeout already handled it")
@@ -109,7 +109,7 @@ func test_disconnect_does_not_block_after_timeout():
 	var deadline := Time.get_ticks_msec() + 3000
 	while Time.get_ticks_msec() < deadline and not state[0]:
 		room.poll_events()
-		OS.delay_msec(50)
+		await get_tree().create_timer(0.05).timeout
 	assert_true(state[0], "Should have timed out")
 
 	var before := Time.get_ticks_msec()

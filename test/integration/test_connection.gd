@@ -6,7 +6,7 @@ func test_connect_emits_connected():
 	if _skip_if_no_server():
 		return
 	_room.connect_to_room(_livekit_url, _token_1, {})
-	var connected = _poll_until(_room, func():
+	var connected = await _poll_until(_room, func():
 		return _room.get_connection_state() == LiveKitRoom.STATE_CONNECTED)
 	assert_true(connected, "Room should reach STATE_CONNECTED")
 	assert_not_null(_room.get_local_participant(),
@@ -18,16 +18,13 @@ func test_connect_emits_connected():
 func test_invalid_token_emits_connection_failed():
 	if _skip_if_no_server():
 		return
-	var failed := false
-	var fail_error := ""
-	_room.connection_failed.connect(func(err: String):
-		failed = true
-		fail_error = err
+	# An Array so the lambda can mutate shared state (lambdas capture locals by value).
+	var state := [false]  # [failed]
+	_room.connection_failed.connect(func(_err: String):
+		state[0] = true
 	)
 	_room.connect_to_room(_livekit_url, "clearly-invalid-token", {})
-	var done = _poll_until(_room, func():
-		return failed or _room.get_connection_state() == LiveKitRoom.STATE_DISCONNECTED, 10.0)
-	assert_true(done, "Room should fail with invalid token")
+	var failed = await _poll_until(_room, func(): return state[0], 10.0)
 	assert_true(failed, "connection_failed signal should fire with invalid token")
 	assert_eq(_room.get_connection_state(), LiveKitRoom.STATE_DISCONNECTED,
 		"Room should be STATE_DISCONNECTED after connection_failed")
@@ -37,10 +34,10 @@ func test_disconnect_after_connect():
 	if _skip_if_no_server():
 		return
 	_room.connect_to_room(_livekit_url, _token_1, {})
-	_poll_until(_room, func():
+	await _poll_until(_room, func():
 		return _room.get_connection_state() == LiveKitRoom.STATE_CONNECTED)
 	_room.disconnect_from_room()
-	var disconnected = _poll_until(_room, func():
+	var disconnected = await _poll_until(_room, func():
 		return _room.get_connection_state() == LiveKitRoom.STATE_DISCONNECTED)
 	assert_true(disconnected,
 		"Room should return to STATE_DISCONNECTED after disconnect")
@@ -52,13 +49,13 @@ func test_reconnect_after_disconnect():
 	if _skip_if_no_server():
 		return
 	_room.connect_to_room(_livekit_url, _token_1, {})
-	_poll_until(_room, func():
+	await _poll_until(_room, func():
 		return _room.get_connection_state() == LiveKitRoom.STATE_CONNECTED)
 	_room.disconnect_from_room()
-	_poll_until(_room, func():
+	await _poll_until(_room, func():
 		return _room.get_connection_state() == LiveKitRoom.STATE_DISCONNECTED)
 	# Second connect should succeed
 	_room.connect_to_room(_livekit_url, _token_1, {})
-	var reconnected = _poll_until(_room, func():
+	var reconnected = await _poll_until(_room, func():
 		return _room.get_connection_state() == LiveKitRoom.STATE_CONNECTED)
 	assert_true(reconnected, "Second connect should succeed")

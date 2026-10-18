@@ -117,7 +117,7 @@ func _poll_until(room: LiveKitRoom, condition: Callable, timeout_sec: float = 10
 		room.poll_events()
 		if condition.call():
 			return true
-		OS.delay_msec(50)
+		await get_tree().create_timer(0.05).timeout
 	return false
 
 
@@ -130,7 +130,7 @@ func _poll_both(condition: Callable, timeout_sec: float = 10.0) -> bool:
 		_room2.poll_events()
 		if condition.call():
 			return true
-		OS.delay_msec(50)
+		await get_tree().create_timer(0.05).timeout
 	return false
 
 
@@ -138,19 +138,19 @@ func _poll_both(condition: Callable, timeout_sec: float = 10.0) -> bool:
 ## Returns true if both connected and discovered each other.
 func _connect_both_rooms() -> bool:
 	_room.connect_to_room(_livekit_url, _token_1, {})
-	var r1 = _poll_until(_room, func():
+	var r1 = await _poll_until(_room, func():
 		return _room.get_connection_state() == LiveKitRoom.STATE_CONNECTED, 15.0)
 	if not r1:
 		return false
 
 	_room2.connect_to_room(_livekit_url, _token_2, {})
-	var r2 = _poll_until(_room2, func():
+	var r2 = await _poll_until(_room2, func():
 		return _room2.get_connection_state() == LiveKitRoom.STATE_CONNECTED, 15.0)
 	if not r2:
 		return false
 
 	# Wait for both to see each other
-	var mutual = _poll_both(func():
+	var mutual = await _poll_both(func():
 		return _room.get_remote_participants().size() >= 1 \
 			and _room2.get_remote_participants().size() >= 1, 15.0)
 	return mutual

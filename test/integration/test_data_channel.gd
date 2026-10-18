@@ -23,17 +23,17 @@ func after_each():
 
 func _connect_both_rooms():
 	_room.connect_to_room(_livekit_url, _token_1, {})
-	_poll_until(_room, func():
+	await _poll_until(_room, func():
 		return _room.get_connection_state() == LiveKitRoom.STATE_CONNECTED)
 	_room2.connect_to_room(_livekit_url, _token_2, {})
-	_poll_until(_room2, func():
+	await _poll_until(_room2, func():
 		return _room2.get_connection_state() == LiveKitRoom.STATE_CONNECTED)
 	# Wait for both to see each other
-	_poll_until(_room, func():
+	await _poll_until(_room, func():
 		return _room.get_remote_participants().size() == 1, 10.0)
 
 
-func _on_data_received(data: PackedByteArray, _participant, topic: String):
+func _on_data_received(data: PackedByteArray, _participant, _kind: int, topic: String):
 	_received_data = data
 	_received_topic = topic
 
@@ -41,7 +41,7 @@ func _on_data_received(data: PackedByteArray, _participant, topic: String):
 func test_publish_receive_data_reliable():
 	if _skip_if_no_server():
 		return
-	_connect_both_rooms()
+	await _connect_both_rooms()
 	var test_data := PackedByteArray([72, 101, 108, 108, 111])  # "Hello"
 	var test_topic := "test_topic"
 	# Publish from room 1
@@ -49,7 +49,7 @@ func test_publish_receive_data_reliable():
 	assert_not_null(lp, "Local participant needed for publish_data")
 	lp.publish_data(test_data, true, PackedStringArray(), test_topic)
 	# Poll room 2 to receive
-	var received = _poll_until(_room2, func():
+	var received = await _poll_until(_room2, func():
 		_room2.poll_events()
 		return _received_data.size() > 0, 5.0)
 	if received:
@@ -63,12 +63,12 @@ func test_publish_receive_data_reliable():
 func test_publish_unreliable_data():
 	if _skip_if_no_server():
 		return
-	_connect_both_rooms()
+	await _connect_both_rooms()
 	var test_data := PackedByteArray([1, 2, 3])
 	var lp = _room.get_local_participant()
 	assert_not_null(lp, "Local participant needed for publish_data")
 	# Unreliable publish — best effort
 	lp.publish_data(test_data, false, PackedStringArray(), "unreliable_topic")
 	# Give a moment for delivery
-	_poll_until(_room2, func(): return false, 1.0)
+	await _poll_until(_room2, func(): return false, 1.0)
 	assert_true(true, "Unreliable data publish completed without crash")
