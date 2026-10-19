@@ -26,6 +26,48 @@ func test_local_participant_stays_bound_to_its_connection():
 	assert_push_error("no longer connected")
 
 
+func test_local_participant_is_stale_once_the_server_disconnects_it():
+	if _skip_if_no_server():
+		return
+	_room.connect_to_room(_livekit_url, _token_1, {})
+	assert_true(await _poll_until(_room, _connected(_room), 15.0), "room connects")
+	var local: LiveKitLocalParticipant = _room.get_local_participant()
+	var disconnected := [false]
+	_room.disconnected.connect(func(): disconnected[0] = true)
+
+	assert_eq(await _remove_participant("e2e-user-1"), 200, "server removes the participant")
+	assert_true(await _poll_until(_room, func(): return disconnected[0], 15.0), "room reports the disconnect")
+
+	local.publish_data("stale".to_utf8_buffer())
+	assert_push_error("no longer connected")
+
+
+## Has the server remove a participant from the room, returning the HTTP status.
+func _remove_participant(identity: String) -> int:
+	var now := int(Time.get_unix_time_from_system())
+	var claims := {
+		"iss": _api_key, "sub": "e2e-admin", "iat": now, "nbf": now, "exp": now + 600,
+		"video": {"room": _room_name, "roomAdmin": true},
+	}
+	var signing_input := (
+		_base64url_encode(JSON.stringify({"alg": "HS256", "typ": "JWT"}).to_utf8_buffer())
+		+ "." + _base64url_encode(JSON.stringify(claims).to_utf8_buffer())
+	)
+	var signature := Crypto.new().hmac_digest(
+		HashingContext.HASH_SHA256, _api_secret.to_utf8_buffer(), signing_input.to_utf8_buffer()
+	)
+	var http := HTTPRequest.new()
+	add_child_autofree(http)
+	http.request(
+		_livekit_url.replace("ws://", "http://").replace("wss://", "https://") + "/twirp/livekit.RoomService/RemoveParticipant",
+		["Authorization: Bearer " + signing_input + "." + _base64url_encode(signature), "Content-Type: application/json"],
+		HTTPClient.METHOD_POST,
+		JSON.stringify({"room": _room_name, "identity": identity}),
+	)
+	var response: Array = await http.request_completed
+	return response[1]
+
+
 func test_participant_that_joins_and_leaves_between_polls_is_reported():
 	if _skip_if_no_server():
 		return

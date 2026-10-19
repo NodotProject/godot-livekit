@@ -119,10 +119,12 @@
     return p ? { id: idOf(p), local: p === room.localParticipant, info: participantInfo(p) } : null;
   }
 
-  // Returns the room's local participant if participantId still refers to it.
+  // Returns the room's local participant if participantId still refers to it and the connection
+  // hasn't ended. (It may be reconnecting, in which case livekit-client queues the operation.)
   function localParticipantOf(id, participantId) {
     const r = roomOf(id);
-    const lp = r.room && r.connected ? r.room.localParticipant : null;
+    const live = r.room && r.connected && r.state !== STATE_DISCONNECTED;
+    const lp = live ? r.room.localParticipant : null;
     if (!lp || idOf(lp) !== participantId) {
       throw new Error('participant is no longer connected');
     }
