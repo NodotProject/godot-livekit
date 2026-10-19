@@ -66,17 +66,21 @@ LOG_FILE="$WORK_DIR/chrome.log"
 SERVER_PID=""
 CHROME_PID=""
 HAD_PRESETS=false
+WROTE_PRESETS=false
 cleanup() {
     [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
     if [ -n "$CHROME_PID" ]; then
         kill "$CHROME_PID" 2>/dev/null || true
         wait "$CHROME_PID" 2>/dev/null || true
     fi
-    # The test preset temporarily replaces the developer's own export presets.
-    if [ "$HAD_PRESETS" = true ]; then
-        mv -f "$WORK_DIR/export_presets.cfg" export_presets.cfg
-    else
-        rm -f export_presets.cfg
+    # The test preset temporarily replaces the developer's own export presets. (Nothing to undo if
+    # it was never written, e.g. because backing up the original failed.)
+    if [ "$WROTE_PRESETS" = true ]; then
+        if [ "$HAD_PRESETS" = true ]; then
+            mv -f "$WORK_DIR/export_presets.cfg" export_presets.cfg
+        else
+            rm -f export_presets.cfg
+        fi
     fi
     rm -rf "$WORK_DIR"
 }
@@ -87,6 +91,7 @@ if [ -f export_presets.cfg ]; then
     cp export_presets.cfg "$WORK_DIR/export_presets.cfg"
     HAD_PRESETS=true
 fi
+WROTE_PRESETS=true
 cat > export_presets.cfg <<'EOF'
 [preset.0]
 
