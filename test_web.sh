@@ -49,6 +49,15 @@ if [ ! -f addons/godot-livekit/bin/libgodot-livekit.web.wasm32.nothreads.wasm ];
     exit 1
 fi
 
+if command -v timeout &> /dev/null; then
+    TIMEOUT_CMD="timeout"
+elif command -v gtimeout &> /dev/null; then
+    TIMEOUT_CMD="gtimeout"
+else
+    echo -e "${RED}timeout not found (on macOS: brew install coreutils).${NC}"
+    exit 1
+fi
+
 tests=("$@")
 if [ ${#tests[@]} -eq 0 ]; then
     for t in "${WEB_UNIT_TESTS[@]}"; do tests+=("res://test/unit/$t.gd"); done
@@ -118,8 +127,8 @@ echo -e "${YELLOW}Exporting web test build...${NC}"
 rm -rf "$EXPORT_DIR"
 mkdir -p "$EXPORT_DIR"
 # Importing fails harmlessly on errors the export reports too (e.g. a missing native library).
-timeout 120 $GODOT_CMD --headless --import >/dev/null 2>&1 || true
-if ! timeout 300 $GODOT_CMD --headless --export-release "Web Test" "$EXPORT_DIR/index.html" >"$WORK_DIR/export.log" 2>&1; then
+"$TIMEOUT_CMD" 120 $GODOT_CMD --headless --import >/dev/null 2>&1 || true
+if ! "$TIMEOUT_CMD" 300 $GODOT_CMD --headless --export-release "Web Test" "$EXPORT_DIR/index.html" >"$WORK_DIR/export.log" 2>&1; then
     tail -20 "$WORK_DIR/export.log"
     echo -e "${RED}Web export failed. Are Godot's web export templates installed?${NC}"
     exit 1
