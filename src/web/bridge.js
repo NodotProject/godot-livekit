@@ -144,7 +144,9 @@
       r.state = STATE_DISCONNECTED;
       push(r, { type: 'disconnected' });
     });
-    room.on(E.Reconnecting, () => {
+    // livekit-client reports a signaling-only resume separately from a full reconnect, and a resume
+    // can escalate into one. Native reports both as a single reconnect.
+    const onReconnecting = () => {
       if (!r.autoReconnect) {
         // Matches the native binding: without auto-reconnect, a lost connection is a disconnect.
         r.state = STATE_DISCONNECTED;
@@ -153,9 +155,14 @@
         room.disconnect();
         return;
       }
+      if (r.state === STATE_RECONNECTING) {
+        return;
+      }
       r.state = STATE_RECONNECTING;
       push(r, { type: 'reconnecting' });
-    });
+    };
+    room.on(E.SignalReconnecting, onReconnecting);
+    room.on(E.Reconnecting, onReconnecting);
     room.on(E.Reconnected, () => {
       r.state = STATE_CONNECTED;
       push(r, { type: 'reconnected' });
