@@ -33,16 +33,22 @@ void LiveKitParticipant::_bind_methods() {
     BIND_ENUM_CONSTANT(KIND_AGENT);
 }
 
-void LiveKitParticipant::bind_web_participant(int p_room_js_id, const String &p_identity, bool p_local) {
+void LiveKitParticipant::bind_web_participant(int p_room_js_id, const Dictionary &p_ref) {
     room_js_id_ = p_room_js_id;
-    identity_ = p_identity;
-    local_ = p_local;
-    _info();
+    js_id_ = p_ref.get("id", 0);
+    local_ = p_ref.get("local", false);
+    update_info(p_ref.get("info", Dictionary()));
+}
+
+void LiveKitParticipant::update_info(const Dictionary &p_info) {
+    if (!p_info.is_empty()) {
+        info_ = p_info;
+    }
 }
 
 Dictionary LiveKitParticipant::_info() const {
-    if (room_js_id_) {
-        Dictionary live = web_call_dict("participant_info", Array::make(room_js_id_, identity_, local_));
+    if (js_id_) {
+        Dictionary live = web_call_dict("participant_info", Array::make(js_id_));
         if (!live.is_empty()) {
             info_ = live;
         }
@@ -53,10 +59,10 @@ Dictionary LiveKitParticipant::_info() const {
 // Returns the participant's publications keyed by track sid.
 Dictionary LiveKitParticipant::_publications() const {
     Dictionary result;
-    if (!room_js_id_) {
+    if (!js_id_) {
         return result;
     }
-    Array infos = web_call("participant_publications", Array::make(room_js_id_, identity_, local_));
+    Array infos = web_call("participant_publications", Array::make(js_id_));
     for (int i = 0; i < infos.size(); i++) {
         Dictionary info = infos[i];
         result[info.get("sid", String())] = LiveKitTrackPublication::from_info(info, !local_);
@@ -73,8 +79,8 @@ String LiveKitParticipant::get_name() const {
 }
 
 String LiveKitParticipant::get_identity() const {
-    // The local participant's identity comes from its token, so it's only known once connected.
-    return local_ ? String(_info().get("identity", String())) : identity_;
+    // Identities don't change, so the cached snapshot's is current.
+    return info_.get("identity", String());
 }
 
 String LiveKitParticipant::get_metadata() const {
@@ -121,32 +127,32 @@ void LiveKitLocalParticipant::_bind_methods() {
 }
 
 void LiveKitLocalParticipant::publish_data(const PackedByteArray &data, bool reliable, const PackedStringArray &destination_identities, const String &topic) {
-    if (!room_js_id_) {
+    if (!js_id_) {
         UtilityFunctions::push_error("LiveKitLocalParticipant::publish_data: not bound");
         return;
     }
     String payload = Marshalls::get_singleton()->raw_to_base64(data);
-    web_call("local_publish_data", Array::make(room_js_id_, payload, reliable, destination_identities, topic));
+    web_call("local_publish_data", Array::make(room_js_id_, js_id_, payload, reliable, destination_identities, topic));
 }
 
 void LiveKitLocalParticipant::set_metadata(const String &metadata) {
-    if (!room_js_id_) {
+    if (!js_id_) {
         UtilityFunctions::push_error("LiveKitLocalParticipant::set_metadata: not bound");
         return;
     }
-    web_call("local_set_metadata", Array::make(room_js_id_, metadata));
+    web_call("local_set_metadata", Array::make(room_js_id_, js_id_, metadata));
 }
 
 void LiveKitLocalParticipant::set_name(const String &name) {
-    if (!room_js_id_) {
+    if (!js_id_) {
         UtilityFunctions::push_error("LiveKitLocalParticipant::set_name: not bound");
         return;
     }
-    web_call("local_set_name", Array::make(room_js_id_, name));
+    web_call("local_set_name", Array::make(room_js_id_, js_id_, name));
 }
 
 void LiveKitLocalParticipant::set_attributes(const Dictionary &attributes) {
-    if (!room_js_id_) {
+    if (!js_id_) {
         UtilityFunctions::push_error("LiveKitLocalParticipant::set_attributes: not bound");
         return;
     }
@@ -155,7 +161,7 @@ void LiveKitLocalParticipant::set_attributes(const Dictionary &attributes) {
     for (int i = 0; i < keys.size(); i++) {
         strings[String(keys[i])] = String(attributes[keys[i]]);
     }
-    web_call("local_set_attributes", Array::make(room_js_id_, strings));
+    web_call("local_set_attributes", Array::make(room_js_id_, js_id_, strings));
 }
 
 Dictionary LiveKitLocalParticipant::get_track_publications() const {
@@ -168,11 +174,11 @@ Ref<LiveKitLocalTrackPublication> LiveKitLocalParticipant::publish_track(const R
 }
 
 void LiveKitLocalParticipant::unpublish_track(const String &track_sid) {
-    if (!room_js_id_) {
+    if (!js_id_) {
         UtilityFunctions::push_error("LiveKitLocalParticipant::unpublish_track: not bound");
         return;
     }
-    web_call("local_unpublish_track", Array::make(room_js_id_, track_sid));
+    web_call("local_unpublish_track", Array::make(room_js_id_, js_id_, track_sid));
 }
 
 void LiveKitLocalParticipant::perform_rpc(const String &destination, const String &method, const String &payload, double timeout) {

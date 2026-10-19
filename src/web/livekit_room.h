@@ -25,12 +25,16 @@ public:
 private:
     int js_id_ = 0;
     int connection_state_ = STATE_DISCONNECTED;
+    // Incremented whenever the connection starts or ends, so events from an earlier connection
+    // can be told apart.
+    int connection_generation_ = 0;
     bool auto_poll_ = true;
     Ref<LiveKitLocalParticipant> local_participant_;
     Dictionary remote_participants_;
 
     void _dispatch(const Dictionary &p_event);
     Ref<LiveKitParticipant> _participant(const Dictionary &p_event, bool p_create_remote = false);
+    Ref<LiveKitRemoteParticipant> _add_remote_participant(const Dictionary &p_ref);
     void _reset_participants();
 
 protected:
