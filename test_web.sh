@@ -30,6 +30,8 @@ WEB_UNIT_TESTS=(
 # Tests that need a server. Their environment variables are passed through the page URL.
 WEB_INTEGRATION_TESTS=(test_connection test_data_channel test_participants)
 WEB_E2E_TESTS=(test_data_messaging test_multi_participant)
+# Web-only e2e tests (see test/web/test_room_lifecycle.gd for why they don't run natively).
+WEB_ONLY_E2E_TESTS=(test_room_lifecycle)
 PASSTHROUGH_ENV=(LIVEKIT_TEST_URL LIVEKIT_TOKEN_1 LIVEKIT_TOKEN_2 RUN_E2E LIVEKIT_E2E_URL LIVEKIT_E2E_ROOM LIVEKIT_API_KEY LIVEKIT_API_SECRET)
 TIMEOUT_SEC="${WEB_TEST_TIMEOUT:-300}"
 PORT="${WEB_TEST_PORT:-8060}"
@@ -55,10 +57,36 @@ if [ ${#tests[@]} -eq 0 ]; then
     fi
     if [ -n "${RUN_E2E:-}" ]; then
         for t in "${WEB_E2E_TESTS[@]}"; do tests+=("res://test/e2e/$t.gd"); done
+        for t in "${WEB_ONLY_E2E_TESTS[@]}"; do tests+=("res://test/web/$t.gd"); done
     fi
 fi
 
-# Export presets are ignored by git, so the test preset is written here.
+WORK_DIR=$(mktemp -d)
+LOG_FILE="$WORK_DIR/chrome.log"
+SERVER_PID=""
+CHROME_PID=""
+HAD_PRESETS=false
+cleanup() {
+    [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
+    if [ -n "$CHROME_PID" ]; then
+        kill "$CHROME_PID" 2>/dev/null || true
+        wait "$CHROME_PID" 2>/dev/null || true
+    fi
+    # The test preset temporarily replaces the developer's own export presets.
+    if [ "$HAD_PRESETS" = true ]; then
+        mv -f "$WORK_DIR/export_presets.cfg" export_presets.cfg
+    else
+        rm -f export_presets.cfg
+    fi
+    rm -rf "$WORK_DIR"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+if [ -f export_presets.cfg ]; then
+    cp export_presets.cfg "$WORK_DIR/export_presets.cfg"
+    HAD_PRESETS=true
+fi
 cat > export_presets.cfg <<'EOF'
 [preset.0]
 
@@ -81,10 +109,13 @@ progressive_web_app/enabled=false
 EOF
 
 echo -e "${YELLOW}Exporting web test build...${NC}"
+# Cleared first so that a failed export can't leave an earlier build to be tested.
+rm -rf "$EXPORT_DIR"
 mkdir -p "$EXPORT_DIR"
+# Importing fails harmlessly on errors the export reports too (e.g. a missing native library).
 timeout 120 $GODOT_CMD --headless --import >/dev/null 2>&1 || true
-timeout 300 $GODOT_CMD --headless --export-release "Web Test" "$EXPORT_DIR/index.html" >/dev/null 2>&1 || true
-if [ ! -f "$EXPORT_DIR/index.html" ]; then
+if ! timeout 300 $GODOT_CMD --headless --export-release "Web Test" "$EXPORT_DIR/index.html" >"$WORK_DIR/export.log" 2>&1; then
+    tail -20 "$WORK_DIR/export.log"
     echo -e "${RED}Web export failed. Are Godot's web export templates installed?${NC}"
     exit 1
 fi
@@ -105,23 +136,12 @@ PY
 
 python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$EXPORT_DIR" >/dev/null 2>&1 &
 SERVER_PID=$!
-PROFILE_DIR=$(mktemp -d)
-LOG_FILE="$PROFILE_DIR/chrome.log"
-cleanup() {
-    kill "$SERVER_PID" 2>/dev/null || true
-    if [ -n "${CHROME_PID:-}" ]; then
-        kill "$CHROME_PID" 2>/dev/null || true
-        wait "$CHROME_PID" 2>/dev/null || true
-    fi
-    rm -rf "$PROFILE_DIR"
-}
-trap cleanup EXIT
 sleep 1
 
 echo -e "${YELLOW}Running ${#tests[@]} test script(s) in headless Chrome...${NC}"
 # Software WebGL (Godot requires WebGL 2) and fake media devices; DISPLAY is unset so Chrome
 # doesn't try to use an X server that may not be reachable.
-env -u DISPLAY -u WAYLAND_DISPLAY "$CHROME" --headless=new --no-sandbox --user-data-dir="$PROFILE_DIR" \
+env -u DISPLAY -u WAYLAND_DISPLAY "$CHROME" --headless=new --no-sandbox --user-data-dir="$WORK_DIR/profile" \
     --enable-logging=stderr --v=0 --ozone-platform=headless --use-angle=swiftshader --enable-unsafe-swiftshader \
     --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream --use-fake-device-for-media-stream \
     "http://127.0.0.1:$PORT/index.html?$query" >"$LOG_FILE" 2>&1 &
