@@ -123,3 +123,20 @@ func test_disconnecting_from_a_handler_drops_the_rest_of_the_batch():
 		[received[0], _room.get_remote_participants().size(), _room.get_connection_state()],
 		[1, 0, LiveKitRoom.STATE_DISCONNECTED],
 	)
+
+
+func test_audio_stream_rejects_a_participant_from_an_earlier_connection():
+	if _skip_if_no_server():
+		return
+	_room.connect_to_room(_livekit_url, _token_1, {})
+	_room2.connect_to_room(_livekit_url, _token_2, {})
+	var sees_room2 := func() -> bool: return _room.get_remote_participants().has("e2e-user-2")
+	assert_true(await _poll_until(_room, sees_room2, 15.0), "room sees room2")
+	var earlier: LiveKitRemoteParticipant = _room.get_remote_participants()["e2e-user-2"]
+
+	_room.disconnect_from_room()
+	_room.connect_to_room(_livekit_url, _token_1, {})
+	assert_true(await _poll_until(_room, sees_room2, 15.0), "room sees room2 again")
+
+	assert_null(LiveKitAudioStream.from_participant(earlier, LiveKitTrack.SOURCE_MICROPHONE))
+	assert_push_error("no longer connected")

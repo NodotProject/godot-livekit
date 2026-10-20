@@ -36,9 +36,20 @@
       id = nextId++;
       objectIds.set(obj, id);
       objects.set(id, new WeakRef(obj));
-      collected.register(obj, id);
+      collected.register(obj, id, obj);
     }
     return id;
+  }
+
+  // Makes id refer to obj from now on instead of to the placeholder it was created for.
+  function promote(id, placeholder, obj) {
+    collected.unregister(placeholder);
+    objects.set(id, new WeakRef(obj));
+    collected.register(obj, id);
+    // Any id obj already has (e.g. from an event) keeps working too.
+    if (!objectIds.has(obj)) {
+      objectIds.set(obj, id);
+    }
   }
 
   function objectOf(id) {
@@ -143,6 +154,17 @@
       throw new Error('participant is no longer connected');
     }
     return lp;
+  }
+
+  // Like localParticipantOf, for a remote participant still in the room.
+  function remoteParticipantOf(id, participantId) {
+    const r = roomOf(id);
+    const p = objectOf(participantId);
+    const live = r.room && r.connected && r.state !== STATE_DISCONNECTED;
+    if (!live || !p || r.room.remoteParticipants.get(p.identity) !== p) {
+      throw new Error('participant is no longer connected');
+    }
+    return p;
   }
 
   // Reports what happened to C++, which only sees events between frames.
@@ -416,9 +438,13 @@
         this.chunks = [];
         this.offset = 0;
         this.queued = 0;
+        // Frames played, dropped or cleared so far, which the main thread compares against the
+        // frames it has sent to know what's still queued.
+        this.removed = 0;
         this.blocks = 0;
         this.port.onmessage = (e) => {
           if (e.data === 'clear') {
+            this.removed += this.queued;
             this.chunks = [];
             this.offset = 0;
             this.queued = 0;
@@ -426,10 +452,19 @@
           }
           this.chunks.push(e.data);
           this.queued += e.data.length / this.channels;
-          while (this.capacity && this.queued > this.capacity && this.chunks.length > 1) {
-            this.queued -= (this.chunks[0].length - this.offset) / this.channels;
-            this.chunks.shift();
-            this.offset = 0;
+          while (this.capacity && this.queued > this.capacity) {
+            const excess = this.queued - this.capacity;
+            const remaining = (this.chunks[0].length - this.offset) / this.channels;
+            if (remaining > excess) {
+              this.offset += excess * this.channels;
+              this.queued -= excess;
+              this.removed += excess;
+            } else {
+              this.chunks.shift();
+              this.offset = 0;
+              this.queued -= remaining;
+              this.removed += remaining;
+            }
           }
         };
       }
@@ -447,13 +482,14 @@
           }
           this.offset += this.channels;
           this.queued--;
+          this.removed++;
           if (this.offset >= chunk.length) {
             this.chunks.shift();
             this.offset = 0;
           }
         }
         if (++this.blocks % 8 === 0) {
-          this.port.postMessage(Math.max(this.queued, 0) / sampleRate);
+          this.port.postMessage(this.removed);
         }
         return true;
       }
@@ -569,6 +605,11 @@
       }
       data = converted;
     }
+    // Resampling down can leave nothing from a very short capture.
+    if (!data.length) {
+      return;
+    }
+    s.sent += data.length / s.channels;
     if (s.node) {
       s.node.port.postMessage(data, [data.buffer]);
     } else {
@@ -671,20 +712,27 @@
         channels: Math.max(1, Math.min(2, channels)),
         pending: [],
         node: null,
-        queued: 0,
+        // Frames sent toward the worklet, and how many of them it has reported removing. The
+        // queue is their difference, so it's current even before the worklet's next report.
+        sent: 0,
+        removed: 0,
+        capacity: queueMs > 0 ? 0 : ctx.sampleRate * DIRECT_CAPTURE_SECONDS,
         destination: ctx.createMediaStreamDestination(),
       };
       sources.set(id, s);
       workletsReady.then(() => {
+        if (sources.get(id) !== s) {
+          return;
+        }
         s.node = new AudioWorkletNode(ctx, 'godot-livekit-source', {
           numberOfInputs: 0,
           outputChannelCount: [s.channels],
           processorOptions: {
             channels: s.channels,
-            capacity: queueMs > 0 ? 0 : ctx.sampleRate * DIRECT_CAPTURE_SECONDS,
+            capacity: s.capacity,
           },
         });
-        s.node.port.onmessage = (e) => (s.queued = e.data);
+        s.node.port.onmessage = (e) => (s.removed = Math.max(s.removed, e.data));
         s.node.connect(s.destination);
         for (const data of s.pending) {
           s.node.port.postMessage(data, [data.buffer]);
@@ -707,8 +755,12 @@
     source_clear(id) {
       const s = sources.get(id);
       if (s) {
+        for (const data of s.pending) {
+          s.sent -= data.length / s.channels;
+        }
         s.pending = [];
-        s.queued = 0;
+        // The worklet's later reports will include the cleared frames.
+        s.removed = s.sent;
         if (s.node) {
           s.node.port.postMessage('clear');
         }
@@ -717,7 +769,12 @@
 
     source_queued_duration(id) {
       const s = sources.get(id);
-      return s ? s.queued : 0;
+      if (!s) {
+        return 0;
+      }
+      // The worklet drops frames beyond capacity as they arrive but reports it later.
+      const queued = s.capacity ? Math.min(s.sent - s.removed, s.capacity) : s.sent - s.removed;
+      return queued / context().sampleRate;
     },
 
     local_audio_track_create(sourceId, name) {
@@ -761,10 +818,7 @@
       pendingPublications.add(placeholder);
       const pubId = idOf(placeholder);
       lp.publishTrack(track, publishOptions)
-        .then((pub) => {
-          objects.set(pubId, new WeakRef(pub));
-          objectIds.set(pub, pubId);
-        })
+        .then((pub) => promote(pubId, placeholder, pub))
         .catch(warn('publish_track'))
         .finally(() => pendingPublications.delete(placeholder));
       return publicationInfo(placeholder);
@@ -780,11 +834,8 @@
       return id;
     },
 
-    stream_from_participant(participantId, source) {
-      const participant = objectOf(participantId);
-      if (!(participant instanceof LK.RemoteParticipant)) {
-        throw new Error('invalid participant');
-      }
+    stream_from_participant(roomId, participantId, source) {
+      const participant = remoteParticipantOf(roomId, participantId);
       const sourceName = ['unknown', 'camera', 'microphone', 'screen_share', 'screen_share_audio'][source];
       const [id, st] = newStream();
       const matches = (track) => track && track.kind === 'audio' && track.source === sourceName;
