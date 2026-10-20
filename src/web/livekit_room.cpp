@@ -123,6 +123,7 @@ LiveKitRoom::~LiveKitRoom() {
 }
 
 bool LiveKitRoom::connect_to_room(const String &url, const String &token, const Dictionary &options) {
+    connection_generation_++;
     _reset_participants();
     connection_state_ = STATE_DISCONNECTED;
     web_call("room_connect", Array::make(js_id_, url, token, options));
@@ -130,6 +131,7 @@ bool LiveKitRoom::connect_to_room(const String &url, const String &token, const 
 }
 
 void LiveKitRoom::disconnect_from_room() {
+    connection_generation_++;
     web_call("room_disconnect", Array::make(js_id_));
     _reset_participants();
     connection_state_ = STATE_DISCONNECTED;
@@ -137,7 +139,9 @@ void LiveKitRoom::disconnect_from_room() {
 
 void LiveKitRoom::poll_events() {
     Array events = web_call("room_take_events", Array::make(js_id_));
-    for (int i = 0; i < events.size(); i++) {
+    int generation = connection_generation_;
+    // A signal handler may disconnect or reconnect, after which the rest of the batch is stale.
+    for (int i = 0; i < events.size() && connection_generation_ == generation; i++) {
         _dispatch(events[i]);
     }
 }
@@ -147,22 +151,41 @@ void LiveKitRoom::_reset_participants() {
     remote_participants_.clear();
 }
 
-// Returns the event's participant: the local participant, a known remote participant, or null.
+// Returns the event's participant (the local participant, a known remote participant, or null),
+// updated with the event's snapshot of its state.
 Ref<LiveKitParticipant> LiveKitRoom::_participant(const Dictionary &p_event, bool p_create_remote) {
-    if (p_event.get("local", false)) {
-        return local_participant_;
-    }
-    String identity = p_event.get("identity", String());
-    if (identity.is_empty()) {
+    Variant ref_value = p_event.get("participant", Variant());
+    if (ref_value.get_type() != Variant::DICTIONARY) {
         return Ref<LiveKitParticipant>();
     }
-    if (!remote_participants_.has(identity) && p_create_remote) {
-        Ref<LiveKitRemoteParticipant> p;
-        p.instantiate();
-        p->bind_web_participant(js_id_, identity, false);
-        remote_participants_[identity] = p;
+    Dictionary ref = ref_value;
+    Ref<LiveKitParticipant> p;
+    if (ref.get("local", false)) {
+        p = local_participant_;
+    } else {
+        String identity = Dictionary(ref.get("info", Dictionary())).get("identity", String());
+        p = remote_participants_.get(identity, Variant());
+        if (p.is_valid() && p->get_js_id() != int(ref.get("id", 0))) {
+            // A different participant with the same identity (e.g. one who rejoined).
+            p.unref();
+        }
+        if (p.is_null() && p_create_remote) {
+            p = _add_remote_participant(ref);
+        }
     }
-    return remote_participants_.get(identity, Variant());
+    if (p.is_valid() && p->get_js_id() == int(ref.get("id", 0))) {
+        p->update_info(ref.get("info", Dictionary()));
+        return p;
+    }
+    return Ref<LiveKitParticipant>();
+}
+
+Ref<LiveKitRemoteParticipant> LiveKitRoom::_add_remote_participant(const Dictionary &p_ref) {
+    Ref<LiveKitRemoteParticipant> p;
+    p.instantiate();
+    p->bind_web_participant(js_id_, p_ref);
+    remote_participants_[p->get_identity()] = p;
+    return p;
 }
 
 void LiveKitRoom::_dispatch(const Dictionary &p_event) {
@@ -170,12 +193,10 @@ void LiveKitRoom::_dispatch(const Dictionary &p_event) {
     if (type == "connected") {
         connection_state_ = STATE_CONNECTED;
         local_participant_.instantiate();
-        local_participant_->bind_web_participant(js_id_, String(), true);
-        Array identities = web_call("room_remote_identities", Array::make(js_id_));
-        for (int i = 0; i < identities.size(); i++) {
-            Dictionary event;
-            event["identity"] = identities[i];
-            _participant(event, true);
+        local_participant_->bind_web_participant(js_id_, p_event.get("local", Dictionary()));
+        Array remotes = p_event.get("remotes", Array());
+        for (int i = 0; i < remotes.size(); i++) {
+            _add_remote_participant(remotes[i]);
         }
         emit_signal("connected");
     } else if (type == "connection_failed") {
@@ -223,7 +244,7 @@ void LiveKitRoom::_dispatch(const Dictionary &p_event) {
         Ref<LiveKitTrackPublication> pub = LiveKitTrackPublication::from_info(p_event.get("publication", Dictionary()), true);
         emit_signal(type, track, pub, _participant(p_event, true));
     } else if (type == "track_muted" || type == "track_unmuted") {
-        bool local = p_event.get("local", false);
+        bool local = Dictionary(p_event.get("participant", Dictionary())).get("local", false);
         Ref<LiveKitTrackPublication> pub = LiveKitTrackPublication::from_info(p_event.get("publication", Dictionary()), !local);
         emit_signal(type, _participant(p_event), pub);
     } else if (type == "local_track_published") {

@@ -41,11 +41,11 @@ Ref<LiveKitAudioStream> LiveKitAudioStream::from_track(const Ref<LiveKitTrack> &
 }
 
 Ref<LiveKitAudioStream> LiveKitAudioStream::from_participant(const Ref<LiveKitRemoteParticipant> &participant, int source) {
-    if (participant.is_null() || !participant->get_room_js_id()) {
+    if (participant.is_null() || !participant->get_js_id()) {
         UtilityFunctions::push_error("LiveKitAudioStream::from_participant: invalid participant");
         return Ref<LiveKitAudioStream>();
     }
-    Variant id = web_call("stream_from_participant", Array::make(participant->get_room_js_id(), participant->get_identity(), source));
+    Variant id = web_call("stream_from_participant", Array::make(participant->get_js_id(), source));
     if (id.get_type() == Variant::NIL) {
         return Ref<LiveKitAudioStream>();
     }

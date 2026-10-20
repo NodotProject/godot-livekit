@@ -12,7 +12,9 @@ namespace godot {
 class LiveKitTrack;
 class LiveKitLocalTrackPublication;
 
-// Web implementation of LiveKitParticipant, identified by its room and identity.
+// Web implementation of LiveKitParticipant, bound to one livekit-client participant. (Not just an
+// identity, since a participant who rejoins, or the next connection's local participant, is a
+// different participant.)
 class LiveKitParticipant : public RefCounted {
     GDCLASS(LiveKitParticipant, RefCounted)
 
@@ -29,7 +31,7 @@ protected:
     static void _bind_methods();
 
     int room_js_id_ = 0;
-    String identity_;
+    int js_id_ = 0;
     bool local_ = false;
     // The last known state, used once the participant has left the room.
     mutable Dictionary info_;
@@ -38,8 +40,12 @@ protected:
     Dictionary _publications() const;
 
 public:
-    void bind_web_participant(int p_room_js_id, const String &p_identity, bool p_local);
+    // Binds to the participant described by p_ref (a bridge.js participantRef) in a room.
+    void bind_web_participant(int p_room_js_id, const Dictionary &p_ref);
+    // Records a newer snapshot of the participant's state, e.g. from an event.
+    void update_info(const Dictionary &p_info);
     int get_room_js_id() const { return room_js_id_; }
+    int get_js_id() const { return js_id_; }
 
     String get_sid() const;
     String get_name() const;

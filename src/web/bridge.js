@@ -127,14 +127,22 @@
     return r;
   }
 
-  function participantOf(r, identity, isLocal) {
-    if (!r.room) {
-      return null;
+  // Identifies a specific participant (not just an identity, which a later participant may reuse)
+  // and snapshots its state, since it may have left by the time C++ handles an event.
+  function participantRef(room, p) {
+    return p ? { id: idOf(p), local: p === room.localParticipant, info: participantInfo(p) } : null;
+  }
+
+  // Returns the room's local participant if participantId still refers to it and the connection
+  // hasn't ended. (It may be reconnecting, in which case livekit-client queues the operation.)
+  function localParticipantOf(id, participantId) {
+    const r = roomOf(id);
+    const live = r.room && r.connected && r.state !== STATE_DISCONNECTED;
+    const lp = live ? r.room.localParticipant : null;
+    if (!lp || idOf(lp) !== participantId) {
+      throw new Error('participant is no longer connected');
     }
-    if (isLocal) {
-      return r.room.localParticipant;
-    }
-    return r.room.getParticipantByIdentity(identity) || null;
+    return lp;
   }
 
   // Reports what happened to C++, which only sees events between frames.
@@ -145,12 +153,14 @@
   function listen(r) {
     const room = r.room;
     const E = LK.RoomEvent;
-    const who = (p) => ({ identity: p ? p.identity : '', local: !!(p && p === room.localParticipant) });
+    const who = (p) => ({ participant: participantRef(room, p) });
     room.on(E.Disconnected, () => {
       r.state = STATE_DISCONNECTED;
       push(r, { type: 'disconnected' });
     });
-    room.on(E.Reconnecting, () => {
+    // livekit-client reports a signaling-only resume separately from a full reconnect, and a resume
+    // can escalate into one. Native reports both as a single reconnect.
+    const onReconnecting = () => {
       if (!r.autoReconnect) {
         // Matches the native binding: without auto-reconnect, a lost connection is a disconnect.
         r.state = STATE_DISCONNECTED;
@@ -159,18 +169,23 @@
         room.disconnect();
         return;
       }
+      if (r.state === STATE_RECONNECTING) {
+        return;
+      }
       r.state = STATE_RECONNECTING;
       push(r, { type: 'reconnecting' });
-    });
+    };
+    room.on(E.SignalReconnecting, onReconnecting);
+    room.on(E.Reconnecting, onReconnecting);
     room.on(E.Reconnected, () => {
       r.state = STATE_CONNECTED;
       push(r, { type: 'reconnected' });
     });
     room.on(E.ParticipantConnected, (p) => {
       r.names.set(p.identity, p.name || '');
-      push(r, { type: 'participant_connected', identity: p.identity });
+      push(r, Object.assign({ type: 'participant_connected' }, who(p)));
     });
-    room.on(E.ParticipantDisconnected, (p) => push(r, { type: 'participant_disconnected', identity: p.identity }));
+    room.on(E.ParticipantDisconnected, (p) => push(r, Object.assign({ type: 'participant_disconnected' }, who(p))));
     room.on(E.RoomMetadataChanged, (metadata) => {
       push(r, { type: 'room_metadata_changed', old: r.metadata, new: metadata || '' });
       r.metadata = metadata || '';
@@ -283,7 +298,11 @@
           r.state = STATE_CONNECTED;
           r.connected = true;
           // 'connected' comes first, as in the native binding.
-          r.events.push({ type: 'connected' });
+          r.events.push({
+            type: 'connected',
+            local: participantRef(room, room.localParticipant),
+            remotes: Array.from(room.remoteParticipants.values()).map((p) => participantRef(room, p)),
+          });
           r.events.push(...r.pending);
           r.pending = [];
         })
@@ -321,34 +340,29 @@
       };
     },
 
-    room_remote_identities(id) {
-      const r = roomOf(id);
-      return r.connected && r.room ? Array.from(r.room.remoteParticipants.keys()) : [];
-    },
-
-    participant_info(id, identity, isLocal) {
-      const p = participantOf(roomOf(id), identity, isLocal);
+    participant_info(participantId) {
+      const p = objectOf(participantId);
       return p ? participantInfo(p) : null;
     },
 
-    participant_publications(id, identity, isLocal) {
-      const p = participantOf(roomOf(id), identity, isLocal);
+    participant_publications(participantId) {
+      const p = objectOf(participantId);
       return p ? Array.from(p.trackPublications.values()).map(publicationInfo) : [];
     },
 
-    local_set_metadata(id, metadata) {
-      roomOf(id).room.localParticipant.setMetadata(metadata).catch(warn('set_metadata'));
+    local_set_metadata(id, participantId, metadata) {
+      localParticipantOf(id, participantId).setMetadata(metadata).catch(warn('set_metadata'));
     },
 
-    local_set_name(id, name) {
-      roomOf(id).room.localParticipant.setName(name).catch(warn('set_name'));
+    local_set_name(id, participantId, name) {
+      localParticipantOf(id, participantId).setName(name).catch(warn('set_name'));
     },
 
-    local_set_attributes(id, attributes) {
-      roomOf(id).room.localParticipant.setAttributes(attributes).catch(warn('set_attributes'));
+    local_set_attributes(id, participantId, attributes) {
+      localParticipantOf(id, participantId).setAttributes(attributes).catch(warn('set_attributes'));
     },
 
-    local_publish_data(id, b64, reliable, destinations, topic) {
+    local_publish_data(id, participantId, b64, reliable, destinations, topic) {
       const options = { reliable: !!reliable };
       if (destinations.length) {
         options.destinationIdentities = destinations;
@@ -356,11 +370,11 @@
       if (topic) {
         options.topic = topic;
       }
-      roomOf(id).room.localParticipant.publishData(fromBase64(b64), options).catch(warn('publish_data'));
+      localParticipantOf(id, participantId).publishData(fromBase64(b64), options).catch(warn('publish_data'));
     },
 
-    local_unpublish_track(id, sid) {
-      const lp = roomOf(id).room.localParticipant;
+    local_unpublish_track(id, participantId, sid) {
+      const lp = localParticipantOf(id, participantId);
       const pub = lp.trackPublications.get(sid);
       if (pub && pub.track) {
         lp.unpublishTrack(pub.track).catch(warn('unpublish_track'));
@@ -725,8 +739,8 @@
       }
     },
 
-    local_publish_track(id, trackId, options) {
-      const lp = roomOf(id).room.localParticipant;
+    local_publish_track(id, participantId, trackId, options) {
+      const lp = localParticipantOf(id, participantId);
       const track = objectOf(trackId);
       if (!track) {
         throw new Error('invalid track');
@@ -766,10 +780,9 @@
       return id;
     },
 
-    stream_from_participant(roomId, identity, source) {
-      const r = roomOf(roomId);
-      const participant = participantOf(r, identity, false);
-      if (!participant) {
+    stream_from_participant(participantId, source) {
+      const participant = objectOf(participantId);
+      if (!(participant instanceof LK.RemoteParticipant)) {
         throw new Error('invalid participant');
       }
       const sourceName = ['unknown', 'camera', 'microphone', 'screen_share', 'screen_share_audio'][source];
