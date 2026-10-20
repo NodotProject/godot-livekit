@@ -18,7 +18,10 @@ SCONS_FLAGS=""
 LIVEKIT_VERSION="0.3.1"
 GODOT_CPP_VERSION="godot-4.5-stable"
 FRAMETAP_VERSION="0.1.3"
+LIVEKIT_JS_VERSION="2.22.3"
+LIVEKIT_JS_SHA256="0f920230001fcbfdccb0bcd2efffd64da8594808908953ed466d4c39c1529fa3"
 SKIP_FRAMETAP=false
+SKIP_LIVEKIT_SDK=false
 
 # Verify a downloaded file's SHA-256 hash (if a hash is provided).
 verify_checksum() {
@@ -55,6 +58,7 @@ show_usage() {
     echo "  macos [arm64|x86_64]: Build for macOS (defaults to host arch)"
     echo "  windows: Build for Windows (x86_64, cross-compile)"
     echo "  android [arm64]: Build for Android (arm64, requires ANDROID_NDK_ROOT)"
+    echo "  web: Build for the web (wasm32, single-threaded, requires emcc from emsdk on PATH)"
     echo "  --debug: Build debug variant (template_debug) instead of release"
     exit 1
 }
@@ -108,6 +112,16 @@ setup_android() {
     echo -e "${BLUE}=== Godot-LiveKit Local Build Script (Android arm64) ===${NC}"
 }
 
+setup_web() {
+    PLATFORM="web"
+    ARCH="wasm32"
+    # Godot's web export templates default to single-threaded builds since 4.3.
+    SCONS_FLAGS="-f SConstruct.web platform=web threads=no"
+    SKIP_FRAMETAP=true
+    SKIP_LIVEKIT_SDK=true
+    echo -e "${BLUE}=== Godot-LiveKit Local Build Script (Web) ===${NC}"
+}
+
 # --- Build Functions ---
 
 # Function to check if godot-cpp cache is valid
@@ -145,6 +159,9 @@ fetch_godotcpp() {
     local gcpp_flags="platform=${PLATFORM} target=${BUILD_TARGET}"
     if [ -n "$ARCH" ]; then
         gcpp_flags="$gcpp_flags arch=${ARCH}"
+    fi
+    if [ "$PLATFORM" == "web" ]; then
+        gcpp_flags="$gcpp_flags threads=no"
     fi
     if [ "$PLATFORM" == "android" ]; then
         export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
@@ -205,6 +222,25 @@ fetch_livekit() {
     [ "$PLATFORM" == "macos" ] && version_key="${LIVEKIT_VERSION}-${ARCH}"
     echo "$version_key" > livekit-sdk/.version
     echo -e "${GREEN}LiveKit SDK downloaded and extracted successfully!${NC}"
+}
+
+# Function to download livekit-client, which the web build embeds
+fetch_livekit_js() {
+    if [ -f "livekit-js/.version" ] && [ "$(cat livekit-js/.version)" = "$LIVEKIT_JS_VERSION" ]; then
+        echo -e "${GREEN}Using cached livekit-client ${LIVEKIT_JS_VERSION}${NC}"
+        return 0
+    fi
+    echo -e "${YELLOW}Fetching livekit-client ${LIVEKIT_JS_VERSION}...${NC}"
+    local archive="livekit-client-${LIVEKIT_JS_VERSION}.tgz"
+    curl -sL "https://registry.npmjs.org/livekit-client/-/${archive}" -o "${archive}"
+    verify_checksum "${archive}" "${LIVEKIT_JS_SHA256}"
+    rm -rf livekit-js
+    mkdir -p livekit-js
+    tar -xzf "${archive}" -C livekit-js --strip-components=2 package/dist/livekit-client.umd.js
+    tar -xzf "${archive}" -C livekit-js --strip-components=1 package/LICENSE
+    rm "${archive}"
+    echo "$LIVEKIT_JS_VERSION" > livekit-js/.version
+    echo -e "${GREEN}livekit-client downloaded successfully!${NC}"
 }
 
 # Function to check if frametap cache is valid
@@ -341,6 +377,21 @@ install_dependencies() {
             echo -e "${RED}Missing required tools: ${missing_tools[*]}${NC}"
             exit 1
         fi
+    elif [ "$PLATFORM" == "web" ]; then
+        local required_tools=("scons" "curl" "tar" "emcc")
+        local missing_tools=()
+
+        for tool in "${required_tools[@]}"; do
+            if ! command -v "$tool" &> /dev/null; then
+                missing_tools+=("$tool")
+            fi
+        done
+
+        if [ ${#missing_tools[@]} -ne 0 ]; then
+            echo -e "${RED}Missing required tools: ${missing_tools[*]}${NC}"
+            echo -e "${YELLOW}emcc comes from emsdk (https://emscripten.org), using the version Godot's web templates were built with.${NC}"
+            exit 1
+        fi
     elif [ "$PLATFORM" == "android" ]; then
         local ndk_root="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
         if [ -z "$ndk_root" ] || [ ! -d "$ndk_root" ]; then
@@ -378,6 +429,9 @@ build_main_project() {
         local dep_dir="addons/godot-livekit/bin/android-arm64"
         mkdir -p "$dep_dir"
         cp livekit-sdk/lib/*.so "$dep_dir/" || true
+    elif [ "$PLATFORM" == "web" ]; then
+        # livekit-client is embedded in the wasm, so its license ships alongside it.
+        cp livekit-js/LICENSE addons/godot-livekit/bin/livekit-client-LICENSE.txt
     elif [ "$PLATFORM" == "linux" ]; then
         cp livekit-sdk/lib/*.so* addons/godot-livekit/bin/ || true
     elif [ "$PLATFORM" == "windows" ]; then
@@ -413,7 +467,7 @@ main() {
             --debug)
                 BUILD_TARGET="template_debug"
                 ;;
-            linux|macos|windows|android)
+            linux|macos|windows|android|web)
                 platform_arg="$arg"
                 ;;
             arm64|x86_64)
@@ -442,6 +496,9 @@ main() {
         android)
             setup_android
             ;;
+        web)
+            setup_web
+            ;;
     esac
 
     echo -e "${BLUE}Platform: ${PLATFORM}, Architecture: ${ARCH}${NC}"
@@ -457,7 +514,9 @@ main() {
         echo -e "${GREEN}Using cached frametap${NC}"
     fi
 
-    if ! check_livekit_cache; then
+    if [ "$SKIP_LIVEKIT_SDK" = true ]; then
+        fetch_livekit_js
+    elif ! check_livekit_cache; then
         fetch_livekit
     else
         echo -e "${GREEN}Using cached livekit SDK${NC}"

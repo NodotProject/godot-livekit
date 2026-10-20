@@ -8,6 +8,9 @@ export_presets.cfg
 # Build artifacts and downloaded SDKs
 godot-cpp/
 livekit-sdk/
+livekit-js/
+src/web/gen/
+*.wasm
 frametap/
 .sconsign.dblite
 *.a

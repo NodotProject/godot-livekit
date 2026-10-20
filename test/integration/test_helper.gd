@@ -11,6 +11,9 @@ var _room: LiveKitRoom = null
 
 func _get_env(key: String, default_value: String = "") -> String:
 	var value = OS.get_environment(key)
+	if value == "" and OS.has_feature("web"):
+		# Web builds have no environment; test_web.sh passes these as URL query parameters.
+		value = str(JavaScriptBridge.eval("new URLSearchParams(location.search).get('%s') || ''" % key))
 	if value == null or value == "":
 		return default_value
 	return value
