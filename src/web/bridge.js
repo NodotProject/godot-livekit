@@ -855,7 +855,13 @@
       pendingPublications.add(placeholder);
       const pubId = idOf(placeholder);
       lp.publishTrack(track, publishOptions)
-        .then((pub) => promote(pubId, placeholder, pub))
+        .then((pub) => {
+          promote(pubId, placeholder, pub);
+          const source = videoCaptureTracks.get(track.mediaStreamTrack);
+          if (source) {
+            resendVideoFrames(source, track.mediaStreamTrack);
+          }
+        })
         .catch(warn('publish_track'))
         .finally(() => pendingPublications.delete(placeholder));
       return publicationInfo(placeholder);
@@ -906,6 +912,239 @@
     },
   });
 
+  // --- Video ---
+  //
+  // Captured frames are drawn onto a canvas whose captureStream() tracks are published. Remote
+  // tracks play in hidden video elements, and polling reads their newest frame through a canvas.
+
+  const videoSources = new Map();
+  const videoStreams = new Map();
+  // Local video tracks' canvas capture tracks, mapped to their sources.
+  const videoCaptureTracks = new WeakMap();
+  const RESEND_INTERVAL_MS = 200;
+  const RESEND_DURATION_MS = 3000;
+
+  // Called directly (not through `call`) with rgba viewing the wasm heap.
+  function videoSourceCapture(id, rgba, width, height, rotation) {
+    const s = videoSources.get(id);
+    if (!s) {
+      return;
+    }
+    const image = new ImageData(new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, rgba.length), width, height);
+    const quarterTurn = rotation === 90 || rotation === 270;
+    resize(s.canvas, quarterTurn ? height : width, quarterTurn ? width : height);
+    if (rotation === 90 || rotation === 180 || rotation === 270) {
+      // Browsers can't send rotation as metadata the way native WebRTC does, so the pixels turn.
+      resize(s.scratch, width, height);
+      s.scratch.getContext('2d').putImageData(image, 0, 0);
+      s.ctx.save();
+      s.ctx.translate(s.canvas.width / 2, s.canvas.height / 2);
+      s.ctx.rotate((rotation * Math.PI) / 180);
+      s.ctx.drawImage(s.scratch, -width / 2, -height / 2);
+      s.ctx.restore();
+    } else {
+      s.ctx.putImageData(image, 0, 0);
+    }
+    s.captures++;
+    for (const track of s.tracks) {
+      if (track.readyState === 'ended') {
+        s.tracks.delete(track);
+      } else {
+        track.requestFrame();
+      }
+    }
+  }
+
+  // The server only announces a track once its media arrives, and a canvas track only sends a
+  // frame when one is requested after the canvas changes. So until the game captures a frame, a
+  // newly published track resends the source's current one.
+  function resendVideoFrames(s, track) {
+    const captures = s.captures;
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (s.captures !== captures || track.readyState === 'ended' || Date.now() - started > RESEND_DURATION_MS) {
+        clearInterval(timer);
+        return;
+      }
+      // Drawing the canvas onto itself counts as a change without altering it.
+      s.ctx.drawImage(s.canvas, 0, 0);
+      track.requestFrame();
+    }, RESEND_INTERVAL_MS);
+  }
+
+  function resize(canvas, width, height) {
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+  }
+
+  // Captures a stream's newest frame if it hasn't been read yet, returning its [width, height].
+  function videoStreamPrepare(id) {
+    const st = videoStreams.get(id);
+    const el = st && st.element;
+    // HAVE_CURRENT_DATA: a frame can be drawn.
+    if (!el || el.readyState < 2 || !el.videoWidth) {
+      return null;
+    }
+    if (st.frameCallbacks) {
+      if (!st.fresh) {
+        return null;
+      }
+    } else if (el.currentTime === st.lastTime) {
+      return null;
+    }
+    st.fresh = false;
+    st.lastTime = el.currentTime;
+    const width = el.videoWidth;
+    const height = el.videoHeight;
+    resize(st.canvas, width, height);
+    st.ctx.drawImage(el, 0, 0, width, height);
+    st.pixels = st.ctx.getImageData(0, 0, width, height).data;
+    return [width, height];
+  }
+
+  // Copies the frame from videoStreamPrepare into heap (a Uint8Array) at offset.
+  function videoStreamRead(id, heap, offset) {
+    const st = videoStreams.get(id);
+    if (st && st.pixels) {
+      heap.set(st.pixels, offset);
+      st.pixels = null;
+    }
+  }
+
+  function attachVideo(st, track) {
+    if (st.closed || st.track === track || !track.mediaStreamTrack) {
+      return;
+    }
+    detachVideo(st);
+    st.track = track;
+    const el = document.createElement('video');
+    el.muted = true;
+    el.playsInline = true;
+    // In the document but out of sight, since browsers needn't decode video that isn't.
+    Object.assign(el.style, {
+      position: 'fixed',
+      left: '0',
+      top: '0',
+      width: '1px',
+      height: '1px',
+      opacity: '0',
+      pointerEvents: 'none',
+    });
+    document.body.appendChild(el);
+    el.srcObject = new MediaStream([track.mediaStreamTrack]);
+    el.play().catch(() => {});
+    st.element = el;
+    st.fresh = false;
+    st.lastTime = -1;
+    st.frameCallbacks = typeof el.requestVideoFrameCallback === 'function';
+    if (st.frameCallbacks) {
+      const onFrame = () => {
+        if (st.element === el) {
+          st.fresh = true;
+          el.requestVideoFrameCallback(onFrame);
+        }
+      };
+      el.requestVideoFrameCallback(onFrame);
+    }
+  }
+
+  function detachVideo(st) {
+    if (st.element) {
+      st.element.srcObject = null;
+      st.element.remove();
+    }
+    st.track = st.element = st.pixels = null;
+  }
+
+  function newVideoStream() {
+    const id = nextId++;
+    const canvas = document.createElement('canvas');
+    const st = { canvas, ctx: canvas.getContext('2d', { willReadFrequently: true }), closed: false };
+    videoStreams.set(id, st);
+    return [id, st];
+  }
+
+  Object.assign(api, {
+    video_source_create(width, height) {
+      const id = nextId++;
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, width);
+      canvas.height = Math.max(1, height);
+      const ctx = canvas.getContext('2d');
+      // Black (rather than transparent) until the first capture, as a new native source sends.
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      videoSources.set(id, {
+        canvas,
+        ctx,
+        scratch: document.createElement('canvas'),
+        tracks: new Set(),
+        captures: 0,
+      });
+      return id;
+    },
+
+    video_source_destroy(id) {
+      videoSources.delete(id);
+    },
+
+    local_video_track_create(sourceId, name) {
+      const s = videoSources.get(sourceId);
+      if (!s) {
+        throw new Error('invalid video source');
+      }
+      // A capture track per local track, so that each can be muted or stopped on its own.
+      const mediaTrack = s.canvas.captureStream(0).getVideoTracks()[0];
+      s.tracks.add(mediaTrack);
+      videoCaptureTracks.set(mediaTrack, s);
+      const track = new LK.LocalVideoTrack(mediaTrack, undefined, true);
+      track.name = name || '';
+      track.source = LK.Track.Source.Camera;
+      return trackInfo(track);
+    },
+
+    video_stream_from_track(trackId) {
+      const track = objectOf(trackId);
+      if (!track || track.kind !== 'video') {
+        throw new Error('invalid track');
+      }
+      const [id, st] = newVideoStream();
+      attachVideo(st, track);
+      return id;
+    },
+
+    video_stream_from_participant(roomId, participantId, source) {
+      const participant = remoteParticipantOf(roomId, participantId);
+      const sourceName = ['unknown', 'camera', 'microphone', 'screen_share', 'screen_share_audio'][source];
+      const [id, st] = newVideoStream();
+      const matches = (track) => track && track.kind === 'video' && track.source === sourceName;
+      for (const pub of participant.trackPublications.values()) {
+        if (matches(pub.track)) {
+          attachVideo(st, pub.track);
+        }
+      }
+      // Like the native binding, the stream follows the participant's track for that source.
+      st.onSubscribed = (track) => matches(track) && attachVideo(st, track);
+      participant.on(LK.ParticipantEvent.TrackSubscribed, st.onSubscribed);
+      st.participant = participant;
+      return id;
+    },
+
+    video_stream_close(id) {
+      const st = videoStreams.get(id);
+      if (st) {
+        st.closed = true;
+        detachVideo(st);
+        if (st.participant) {
+          st.participant.off(LK.ParticipantEvent.TrackSubscribed, st.onSubscribed);
+        }
+        videoStreams.delete(id);
+      }
+    },
+  });
+
   window.GodotLiveKit = {
     // Returns JSON for C++. Errors are reported as {"__error": message} rather than thrown into wasm.
     call(name, argsJson) {
@@ -921,5 +1160,8 @@
     objectOf,
     sourceCapture,
     streamRead,
+    videoSourceCapture,
+    videoStreamPrepare,
+    videoStreamRead,
   };
 })();

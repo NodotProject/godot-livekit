@@ -2,6 +2,7 @@
 #define GODOT_LIVEKIT_TRACK_H
 
 #include "livekit_audio_source.h"
+#include "livekit_video_source.h"
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -74,6 +75,22 @@ public:
 private:
     // Kept alive for as long as the track, as in the native binding.
     Ref<LiveKitAudioSource> source_;
+};
+
+class LiveKitLocalVideoTrack : public LiveKitTrack {
+    GDCLASS(LiveKitLocalVideoTrack, LiveKitTrack)
+
+protected:
+    static void _bind_methods();
+
+public:
+    static Ref<LiveKitLocalVideoTrack> create(const String &name, const Ref<LiveKitVideoSource> &source);
+    void mute();
+    void unmute();
+
+private:
+    // Kept alive for as long as the track, as in the native binding.
+    Ref<LiveKitVideoSource> source_;
 };
 
 class LiveKitRemoteAudioTrack : public LiveKitTrack {
