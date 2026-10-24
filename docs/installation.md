@@ -55,7 +55,7 @@ To export for the web:
 
 - Enable **Extensions Support** in the Web export preset, and leave **Thread Support** off. The web build is single-threaded, like Godot's default web templates.
 - Audio runs on the browser's `AudioContext`, which browsers only start after a user gesture (a click or key press). Audio sources are resampled to its rate, so they needn't use 10ms frames as they do natively.
-- Video sources apply `capture_frame()`'s `rotation` to the pixels, since browsers can't send it as metadata, and use the browser's timestamps. Received video is copied out of the browser through a canvas, which takes main-thread time at large resolutions.
+- Video sources apply `capture_frame()`'s `rotation` to the pixels, since browsers can't send it as metadata, and use the browser's timestamps. Received video is converted to RGBA asynchronously with `VideoFrame.copyTo()` where the browser supports it, so each frame reaches `frame_received` one poll after it arrives. Other browsers read frames through a canvas, which takes main-thread time at large resolutions.
 - LiveKit events are delivered by the browser between frames, so wait for them by yielding (e.g. `await get_tree().process_frame`), not with blocking loops like `OS.delay_msec()`.
 
 ## Installation in Godot

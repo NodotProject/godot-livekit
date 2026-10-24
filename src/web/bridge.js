@@ -1042,7 +1042,8 @@
   // --- Video ---
   //
   // Captured frames are drawn onto a canvas whose captureStream() tracks are published. Remote
-  // tracks play in hidden video elements, and polling reads their newest frame through a canvas.
+  // tracks play in hidden video elements, and polling reads their newest frame with
+  // VideoFrame.copyTo where browsers can convert to RGBA, or through a canvas otherwise.
 
   const videoSources = new Map();
   const videoStreams = new Map();
@@ -1050,6 +1051,8 @@
   const videoCaptureTracks = new WeakMap();
   const RESEND_INTERVAL_MS = 200;
   const RESEND_DURATION_MS = 3000;
+  // Whether VideoFrame.copyTo can convert frames to RGBA, until a browser shows it can't.
+  let videoFrameCopies = typeof VideoFrame === 'function';
 
   // Called directly (not through `call`) with rgba viewing the wasm heap.
   function videoSourceCapture(id, rgba, width, height, rotation) {
@@ -1106,12 +1109,16 @@
     }
   }
 
-  // Captures a stream's newest frame if it hasn't been read yet, returning its [width, height].
+  // Returns the [width, height] of a stream frame that's ready to read, starting to capture the
+  // newest frame if it hasn't been yet.
   function videoStreamPrepare(id) {
     const st = videoStreams.get(id);
     const el = st && st.element;
+    if (st && st.ready) {
+      return [st.ready.width, st.ready.height];
+    }
     // HAVE_CURRENT_DATA: a frame can be drawn.
-    if (!el || el.readyState < 2 || !el.videoWidth) {
+    if (!el || st.copying || el.readyState < 2 || !el.videoWidth) {
       return null;
     }
     if (st.frameCallbacks) {
@@ -1123,20 +1130,72 @@
     }
     st.fresh = false;
     st.lastTime = el.currentTime;
+    if (videoFrameCopies && copyVideoFrame(st, el)) {
+      return null;
+    }
     const width = el.videoWidth;
     const height = el.videoHeight;
     resize(st.canvas, width, height);
     st.ctx.drawImage(el, 0, 0, width, height);
-    st.pixels = st.ctx.getImageData(0, 0, width, height).data;
+    st.ready = { pixels: st.ctx.getImageData(0, 0, width, height).data, width, height };
     return [width, height];
+  }
+
+  // Starts converting el's current frame to RGBA without blocking the game, as getImageData
+  // does, returning false if this frame needs the canvas instead. The result is ready on a
+  // later poll.
+  function copyVideoFrame(st, el) {
+    let frame;
+    try {
+      frame = new VideoFrame(el);
+    } catch (e) {
+      return false;
+    }
+    // Drawing the element applies these, but copyTo doesn't.
+    if (frame.rotation || frame.flip) {
+      frame.close();
+      return false;
+    }
+    const { width, height } = frame.visibleRect;
+    const size = width * height * 4;
+    let supported = false;
+    try {
+      // Older browsers ignore the unknown format option and report the frame's own layout.
+      supported = frame.allocationSize({ format: 'RGBA' }) === size;
+    } catch (e) {}
+    if (!supported) {
+      videoFrameCopies = false;
+      frame.close();
+      return false;
+    }
+    if (!st.buffer || st.buffer.length !== size) {
+      st.buffer = new Uint8Array(size);
+    }
+    const pixels = st.buffer;
+    st.copying = true;
+    frame
+      .copyTo(pixels, { format: 'RGBA' })
+      .then(
+        () => {
+          if (st.element === el) {
+            st.ready = { pixels, width, height };
+          }
+        },
+        () => {},
+      )
+      .finally(() => {
+        frame.close();
+        st.copying = false;
+      });
+    return true;
   }
 
   // Copies the frame from videoStreamPrepare into heap (a Uint8Array) at offset.
   function videoStreamRead(id, heap, offset) {
     const st = videoStreams.get(id);
-    if (st && st.pixels) {
-      heap.set(st.pixels, offset);
-      st.pixels = null;
+    if (st && st.ready) {
+      heap.set(st.ready.pixels, offset);
+      st.ready = null;
     }
   }
 
@@ -1182,7 +1241,7 @@
       st.element.srcObject = null;
       st.element.remove();
     }
-    st.track = st.element = st.pixels = null;
+    st.track = st.element = st.ready = null;
   }
 
   function newVideoStream() {
