@@ -1,6 +1,8 @@
 #ifndef GODOT_LIVEKIT_TRACK_H
 #define GODOT_LIVEKIT_TRACK_H
 
+#include "livekit_audio_source.h"
+
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -58,8 +60,6 @@ public:
     void request_stats();
 };
 
-class LiveKitAudioSource;
-
 class LiveKitLocalAudioTrack : public LiveKitTrack {
     GDCLASS(LiveKitLocalAudioTrack, LiveKitTrack)
 
@@ -70,6 +70,10 @@ public:
     static Ref<LiveKitLocalAudioTrack> create(const String &name, const Ref<LiveKitAudioSource> &source);
     void mute();
     void unmute();
+
+private:
+    // Kept alive for as long as the track, as in the native binding.
+    Ref<LiveKitAudioSource> source_;
 };
 
 class LiveKitRemoteAudioTrack : public LiveKitTrack {

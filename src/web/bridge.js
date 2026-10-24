@@ -57,11 +57,17 @@
     return ref ? ref.deref() : undefined;
   }
 
-  function trackInfo(track) {
+  // livekit-client only names remote tracks on their publications.
+  const trackNames = new WeakMap();
+
+  function trackInfo(track, pub) {
+    if (pub && pub.trackName) {
+      trackNames.set(track, pub.trackName);
+    }
     return {
       id: idOf(track),
       sid: track.sid || '',
-      name: track.name || '',
+      name: track.name || trackNames.get(track) || '',
       kind: KIND[track.kind] || 0,
       source: SOURCE[track.source] || 0,
       muted: !!track.isMuted,
@@ -94,7 +100,7 @@
       mime_type: pub.mimeType || '',
       simulcasted: !!pub.simulcasted,
       subscribed: !!pub.isSubscribed,
-      track: pub.track ? trackInfo(pub.track) : null,
+      track: pub.track ? trackInfo(pub.track, pub) : null,
     };
   }
 
@@ -235,7 +241,7 @@
     room.on(E.LocalTrackPublished, pubEvent('local_track_published'));
     room.on(E.LocalTrackUnpublished, pubEvent('local_track_unpublished'));
     const trackEvent = (type) => (track, pub, p) =>
-      push(r, Object.assign({ type, track: trackInfo(track), publication: publicationInfo(pub) }, who(p)));
+      push(r, Object.assign({ type, track: trackInfo(track, pub), publication: publicationInfo(pub) }, who(p)));
     room.on(E.TrackSubscribed, trackEvent('track_subscribed'));
     room.on(E.TrackUnsubscribed, trackEvent('track_unsubscribed'));
     room.on(E.DataReceived, (payload, p, kind, topic) =>
@@ -442,7 +448,12 @@
         // frames it has sent to know what's still queued.
         this.removed = 0;
         this.blocks = 0;
+        this.stopped = false;
         this.port.onmessage = (e) => {
+          if (e.data === 'stop') {
+            this.stopped = true;
+            return;
+          }
           if (e.data === 'clear') {
             this.removed += this.queued;
             this.chunks = [];
@@ -469,6 +480,8 @@
         };
       }
       process(inputs, outputs) {
+        // A processor that returns true keeps running even once its node is disconnected.
+        if (this.stopped) return false;
         const out = outputs[0];
         const frames = out[0].length;
         for (let i = 0; i < frames; i++) {
@@ -500,8 +513,11 @@
         this.frames = 480;
         this.buffer = new Float32Array(this.frames * 2);
         this.n = 0;
+        this.stopped = false;
+        this.port.onmessage = (e) => (this.stopped = e.data === 'stop');
       }
       process(inputs) {
+        if (this.stopped) return false;
         const input = inputs[0];
         if (!input || !input.length) return true;
         const left = input[0];
@@ -682,7 +698,10 @@
   }
 
   function detachStream(st) {
-    for (const node of [st.input, st.node, st.silence]) {
+    if (st.node) {
+      stopWorklet(st.node);
+    }
+    for (const node of [st.input, st.silence]) {
       if (node) {
         node.disconnect();
       }
@@ -691,6 +710,13 @@
       st.element.srcObject = null;
     }
     st.track = st.input = st.node = st.silence = st.element = null;
+  }
+
+  function stopWorklet(node) {
+    node.port.onmessage = null;
+    node.port.postMessage('stop');
+    node.port.close();
+    node.disconnect();
   }
 
   function newStream() {
@@ -746,7 +772,7 @@
       const s = sources.get(id);
       if (s) {
         if (s.node) {
-          s.node.disconnect();
+          stopWorklet(s.node);
         }
         sources.delete(id);
       }
@@ -782,7 +808,9 @@
       if (!s) {
         throw new Error('invalid audio source');
       }
-      const mediaTrack = s.destination.stream.getAudioTracks()[0];
+      // A clone per track, so that muting or unpublishing (which stops the track) one track
+      // doesn't affect the source's other tracks.
+      const mediaTrack = s.destination.stream.getAudioTracks()[0].clone();
       const track = new LK.LocalAudioTrack(mediaTrack, undefined, true, context());
       track.name = name || '';
       track.source = LK.Track.Source.Microphone;

@@ -33,10 +33,41 @@ func test_published_audio_reaches_remote_room():
 	var source = LiveKitAudioSource.create(SAMPLE_RATE, 1, 0)
 	var track = LiveKitLocalAudioTrack.create("e2e_tone", source)
 	_room.get_local_participant().publish_track(track, {"source": LiveKitTrack.SOURCE_MICROPHONE})
+	await _assert_tone_reaches_room2(source, "e2e_tone")
 
+
+func test_audio_flows_after_another_track_from_its_source_is_unpublished():
+	if _skip_if_no_server():
+		return
+
+	var both = await _connect_both_rooms()
+	assert_true(both, "Both rooms should connect")
+	if not both:
+		return
+
+	var source = LiveKitAudioSource.create(SAMPLE_RATE, 1, 0)
+	var local := _room.get_local_participant()
+	var published := []
+	_room.local_track_published.connect(func(publication, _track): published.append(publication))
+	local.publish_track(LiveKitLocalAudioTrack.create("first", source), {"source": LiveKitTrack.SOURCE_MICROPHONE})
+	assert_true(await _poll_until(_room, func(): return published.size() == 1, 10.0), "first track published")
+	local.unpublish_track(published[0].get_sid())
+	assert_true(
+		await _poll_until(_room, func(): return local.get_track_publications().is_empty(), 10.0),
+		"first track unpublished",
+	)
+
+	var second = LiveKitLocalAudioTrack.create("second", source)
+	local.publish_track(second, {"source": LiveKitTrack.SOURCE_MICROPHONE})
+	await _assert_tone_reaches_room2(source, "second")
+
+
+## Captures a tone into source in real time and checks that room2 receives and plays it from
+## the remote track named track_name.
+func _assert_tone_reaches_room2(source: LiveKitAudioSource, track_name: String) -> void:
 	var state := {"stream": null}
 	_room2.track_subscribed.connect(func(remote_track, _publication, _participant):
-		if remote_track.get_kind() == LiveKitTrack.KIND_AUDIO:
+		if remote_track.get_kind() == LiveKitTrack.KIND_AUDIO and remote_track.get_name() == track_name:
 			state.stream = LiveKitAudioStream.from_track(remote_track)
 	)
 

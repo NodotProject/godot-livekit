@@ -113,7 +113,11 @@ Ref<LiveKitLocalAudioTrack> LiveKitLocalAudioTrack::create(const String &name, c
     if (info.is_empty()) {
         return Ref<LiveKitLocalAudioTrack>();
     }
-    return LiveKitTrack::from_info(info, false);
+    Ref<LiveKitLocalAudioTrack> track = LiveKitTrack::from_info(info, false);
+    if (track.is_valid()) {
+        track->source_ = source;
+    }
+    return track;
 }
 
 void LiveKitLocalAudioTrack::mute() {
