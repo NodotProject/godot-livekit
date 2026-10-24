@@ -107,8 +107,8 @@ void LiveKitLocalParticipant::_bind_methods() {
     ClassDB::bind_method(D_METHOD("unregister_rpc_method", "method"), &LiveKitLocalParticipant::unregister_rpc_method);
     // respond_to_rpc / respond_to_rpc_error are not exposed: the underlying
     // SDK requires synchronous responses from the handler callback, so async
-    // RPC replies are not yet supported.  The handler returns nullopt which
-    // the SDK treats as an application error.
+    // RPC replies are not yet supported.  The handler returns nullopt, which
+    // the SDK sends to the caller as an empty response.
 
     ADD_SIGNAL(MethodInfo("rpc_method_invoked",
             PropertyInfo(Variant::STRING, "method"),
@@ -309,7 +309,7 @@ void LiveKitLocalParticipant::register_rpc_method(const String &method) {
                         String(data.caller_identity.c_str()),
                         String(data.payload.c_str()),
                         data.response_timeout_sec);
-                // Return nullopt to indicate async handling - user calls respond_to_rpc
+                // Replies aren't supported yet (see _bind_methods), so the caller gets an empty response.
                 return std::nullopt;
             });
 }
