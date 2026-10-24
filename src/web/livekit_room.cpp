@@ -253,6 +253,19 @@ void LiveKitRoom::_dispatch(const Dictionary &p_event) {
         emit_signal("local_track_published", pub, pub->get_track());
     } else if (type == "local_track_unpublished") {
         emit_signal("local_track_unpublished", LiveKitTrackPublication::from_info(p_event.get("publication", Dictionary()), false));
+    } else if (type == "rpc_method_invoked") {
+        if (local_participant_.is_valid()) {
+            local_participant_->emit_signal("rpc_method_invoked", p_event.get("method", String()), p_event.get("request_id", String()),
+                    p_event.get("caller_identity", String()), p_event.get("payload", String()), double(p_event.get("response_timeout", 0.0)));
+        }
+    } else if (type == "rpc_response_received") {
+        if (local_participant_.is_valid()) {
+            local_participant_->emit_signal("rpc_response_received", p_event.get("method", String()), p_event.get("result", String()));
+        }
+    } else if (type == "rpc_error") {
+        if (local_participant_.is_valid()) {
+            local_participant_->emit_signal("rpc_error", p_event.get("method", String()), p_event.get("message", String()));
+        }
     } else if (type == "data_received") {
         PackedByteArray data = Marshalls::get_singleton()->base64_to_raw(p_event.get("data", String()));
         emit_signal("data_received", data, _participant(p_event), int(p_event.get("kind", 1)), p_event.get("topic", String()));

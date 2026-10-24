@@ -27,6 +27,7 @@ WEB_UNIT_TESTS=(
     test_platform
     test_room
     test_room_properties
+    test_rpc_unbound
     test_track
     test_track_publication
     test_video_source
@@ -34,7 +35,7 @@ WEB_UNIT_TESTS=(
 )
 # Tests that need a server. Their environment variables are passed through the page URL.
 WEB_INTEGRATION_TESTS=(test_connection test_data_channel test_participants test_tracks)
-WEB_E2E_TESTS=(test_audio_flow test_data_messaging test_full_session test_multi_participant test_track_lifecycle test_video_flow)
+WEB_E2E_TESTS=(test_audio_flow test_data_messaging test_full_session test_multi_participant test_rpc test_stats test_track_lifecycle test_video_flow)
 # Web-only e2e tests (see test/web/test_room_lifecycle.gd for why they don't run natively).
 WEB_ONLY_E2E_TESTS=(test_room_lifecycle)
 PASSTHROUGH_ENV=(LIVEKIT_TEST_URL LIVEKIT_TOKEN_1 LIVEKIT_TOKEN_2 RUN_E2E LIVEKIT_E2E_URL LIVEKIT_E2E_ROOM LIVEKIT_API_KEY LIVEKIT_API_SECRET)

@@ -190,16 +190,31 @@ void LiveKitLocalParticipant::unpublish_track(const String &track_sid) {
     web_call("local_unpublish_track", Array::make(room_js_id_, js_id_, track_sid));
 }
 
+// The result is delivered by the room, through rpc_response_received or rpc_error.
 void LiveKitLocalParticipant::perform_rpc(const String &destination, const String &method, const String &payload, double timeout) {
-    UtilityFunctions::push_error("LiveKitLocalParticipant::perform_rpc: not yet supported on the web");
+    if (!js_id_) {
+        UtilityFunctions::push_error("LiveKitLocalParticipant::perform_rpc: not bound");
+        return;
+    }
+    web_call("local_perform_rpc", Array::make(room_js_id_, js_id_, destination, method, payload, timeout));
 }
 
+// As in the native binding, invocations are reported through rpc_method_invoked and answered
+// with an empty response.
 void LiveKitLocalParticipant::register_rpc_method(const String &method) {
-    UtilityFunctions::push_error("LiveKitLocalParticipant::register_rpc_method: not yet supported on the web");
+    if (!js_id_) {
+        UtilityFunctions::push_error("LiveKitLocalParticipant::register_rpc_method: not bound");
+        return;
+    }
+    web_call("local_register_rpc_method", Array::make(room_js_id_, js_id_, method));
 }
 
 void LiveKitLocalParticipant::unregister_rpc_method(const String &method) {
-    UtilityFunctions::push_error("LiveKitLocalParticipant::unregister_rpc_method: not yet supported on the web");
+    if (!js_id_) {
+        UtilityFunctions::push_error("LiveKitLocalParticipant::unregister_rpc_method: not bound");
+        return;
+    }
+    web_call("local_unregister_rpc_method", Array::make(room_js_id_, js_id_, method));
 }
 
 // LiveKitRemoteParticipant

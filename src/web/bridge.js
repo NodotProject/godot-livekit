@@ -115,6 +115,72 @@
     };
   }
 
+  // The stats the native binding reports, by W3C stats type: snake_case names of W3C fields, typed
+  // i(nteger), f(loat), s(tring) or b(oolean) so that missing ones get the same defaults.
+  const STATS_FIELDS = {
+    'inbound-rtp':
+      'ssrc:i kind:s transport_id:s codec_id:s packets_received:i packets_lost:i jitter:f track_identifier:s ' +
+      'frames_decoded:i frames_dropped:i frame_width:i frame_height:i frames_per_second:f bytes_received:i ' +
+      'nack_count:i pli_count:i fir_count:i freeze_count:i total_freeze_duration:f audio_level:f ' +
+      'total_audio_energy:f total_samples_duration:f concealed_samples:i jitter_buffer_delay:f',
+    'outbound-rtp':
+      'ssrc:i kind:s transport_id:s codec_id:s packets_sent:i bytes_sent:i frame_width:i frame_height:i ' +
+      'frames_per_second:f frames_sent:i frames_encoded:i key_frames_encoded:i target_bitrate:f ' +
+      'total_encode_time:f total_packet_send_delay:f quality_limitation_reason:i nack_count:i pli_count:i ' +
+      'fir_count:i active:b retransmitted_packets_sent:i retransmitted_bytes_sent:i',
+    'remote-inbound-rtp':
+      'ssrc:i kind:s packets_received:i packets_lost:i jitter:f round_trip_time:f total_round_trip_time:f ' +
+      'fraction_lost:f round_trip_time_measurements:i',
+    'remote-outbound-rtp':
+      'ssrc:i kind:s packets_sent:i bytes_sent:i remote_timestamp:f round_trip_time:f total_round_trip_time:f',
+    codec: 'payload_type:i mime_type:s clock_rate:i channels:i',
+    transport: 'packets_sent:i packets_received:i bytes_sent:i bytes_received:i dtls_cipher:s srtp_cipher:s',
+    'candidate-pair':
+      'bytes_sent:i bytes_received:i total_round_trip_time:f current_round_trip_time:f ' +
+      'available_outgoing_bitrate:f available_incoming_bitrate:f nominated:b',
+    'media-source': 'track_identifier:s kind:s',
+    'media-playout': 'total_samples_duration:f total_playout_delay:f total_samples_count:i',
+    'peer-connection': 'data_channels_opened:i data_channels_closed:i',
+    'data-channel': 'label:s messages_sent:i bytes_sent:i messages_received:i bytes_received:i',
+    'local-candidate': 'address:s port:i protocol:s',
+    'remote-candidate': 'address:s port:i protocol:s',
+    certificate: 'fingerprint:s fingerprint_algorithm:s',
+  };
+  // Native names that aren't the W3C name in snake_case.
+  const STATS_W3C_NAMES = { total_freeze_duration: 'totalFreezesDuration' };
+  const QUALITY_LIMITATION_REASON = { none: 0, cpu: 1, bandwidth: 2, other: 3 };
+  const STATS_DEFAULTS = { i: 0, f: 0, s: '', b: false };
+  let statsResults = [];
+
+  // Converts an RTCStatsReport to the native binding's dictionaries. JSON can't tell C++ which
+  // numbers are integers, so each lists its integer fields in __ints.
+  function convertStats(report) {
+    const result = [];
+    for (const stat of report.values()) {
+      const spec = STATS_FIELDS[stat.type];
+      if (!spec) {
+        continue;
+      }
+      const entry = { type: stat.type.replace(/-/g, '_'), id: stat.id, timestamp_ms: Math.round(stat.timestamp) };
+      const ints = ['timestamp_ms'];
+      for (const field of spec.split(' ')) {
+        const [name, kind] = field.split(':');
+        const w3c = STATS_W3C_NAMES[name] || name.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+        let value = stat[w3c];
+        if (name === 'quality_limitation_reason') {
+          value = QUALITY_LIMITATION_REASON[value];
+        }
+        entry[name] = value === undefined || value === null ? STATS_DEFAULTS[kind] : value;
+        if (kind === 'i') {
+          ints.push(name);
+        }
+      }
+      entry.__ints = ints;
+      result.push(entry);
+    }
+    return result;
+  }
+
   function toBase64(bytes) {
     let s = '';
     for (let i = 0; i < bytes.length; i += 0x8000) {
@@ -401,6 +467,45 @@
       localParticipantOf(id, participantId).publishData(fromBase64(b64), options).catch(warn('publish_data'));
     },
 
+    local_perform_rpc(id, participantId, destination, method, payload, timeout) {
+      const lp = localParticipantOf(id, participantId);
+      const r = roomOf(id);
+      const room = r.room;
+      // Results for an earlier connection are dropped, like that connection's other events.
+      const report = (event) => r.room === room && push(r, Object.assign({ method }, event));
+      lp.performRpc({ destinationIdentity: destination, method, payload, responseTimeout: timeout * 1000 }).then(
+        (result) => report({ type: 'rpc_response_received', result: result || '' }),
+        (e) => report({ type: 'rpc_error', message: (e && e.message) || String(e) }),
+      );
+    },
+
+    local_register_rpc_method(id, participantId, method) {
+      localParticipantOf(id, participantId);
+      const r = roomOf(id);
+      const room = r.room;
+      // Registering again replaces the handler, as natively; livekit-client would throw.
+      room.unregisterRpcMethod(method);
+      room.registerRpcMethod(method, (data) => {
+        if (r.room !== room) {
+          return Promise.resolve('');
+        }
+        push(r, {
+          type: 'rpc_method_invoked',
+          method,
+          request_id: data.requestId,
+          caller_identity: data.callerIdentity,
+          payload: data.payload,
+          response_timeout: data.responseTimeout / 1000,
+        });
+        return Promise.resolve('');
+      });
+    },
+
+    local_unregister_rpc_method(id, participantId, method) {
+      localParticipantOf(id, participantId);
+      roomOf(id).room.unregisterRpcMethod(method);
+    },
+
     local_unpublish_track(id, participantId, sid) {
       const lp = localParticipantOf(id, participantId);
       const pub = lp.trackPublications.get(sid);
@@ -419,6 +524,28 @@
       if (pub && typeof pub.setSubscribed === 'function') {
         pub.setSubscribed(!!subscribed);
       }
+    },
+
+    // Starts collecting a track's stats, returning a request id for track_take_stats.
+    track_request_stats(trackId) {
+      const track = objectOf(trackId);
+      const request = nextId++;
+      const done = (result) => statsResults.push(Object.assign({ request }, result));
+      if (!track) {
+        done({ error: 'track is no longer available' });
+      } else {
+        track.getRTCStatsReport().then(
+          (report) => done({ stats: report ? convertStats(report) : [] }),
+          (e) => done({ error: (e && e.message) || String(e) }),
+        );
+      }
+      return request;
+    },
+
+    track_take_stats() {
+      const results = statsResults;
+      statsResults = [];
+      return results;
     },
 
     track_info(trackId) {

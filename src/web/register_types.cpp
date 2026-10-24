@@ -20,6 +20,7 @@ using namespace godot;
 static void livekit_frame_callback() {
     LiveKitRoom::poll_all();
     LiveKitVideoStream::poll_all();
+    LiveKitTrack::poll_stats();
 }
 
 void initialize_livekit_module(ModuleInitializationLevel p_level) {
@@ -55,6 +56,10 @@ void initialize_livekit_module(ModuleInitializationLevel p_level) {
 }
 
 void uninitialize_livekit_module(ModuleInitializationLevel p_level) {
+    if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
+        return;
+    }
+    LiveKitTrack::clear_stats_requests();
 }
 
 extern "C" {
