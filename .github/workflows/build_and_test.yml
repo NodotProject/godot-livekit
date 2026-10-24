@@ -135,9 +135,12 @@ jobs:
     - name: Cache dependencies
       uses: actions/cache@v4
       with:
+        # SConstruct.web builds godot-cpp through its SConscript, so SCons's signatures (in the
+        # root .sconsign.dblite) are what let it reuse the cached objects instead of rebuilding.
         path: |
           godot-cpp
-        key: deps-web-${{ env.EMSCRIPTEN_VERSION }}-${{ hashFiles('build.sh') }}
+          .sconsign.dblite
+        key: deps-web-${{ env.EMSCRIPTEN_VERSION }}-${{ hashFiles('build.sh', 'SConstruct.web') }}
 
     - name: Build GDExtension
       run: ./build.sh web
