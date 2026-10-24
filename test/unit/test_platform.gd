@@ -36,12 +36,9 @@ func test_all_classes_registered():
 	if OS.has_feature("web"):
 		# Not implemented on the web yet.
 		for cls in [
-			"LiveKitLocalAudioTrack",
 			"LiveKitLocalVideoTrack",
 			"LiveKitVideoStream",
-			"LiveKitAudioStream",
 			"LiveKitVideoSource",
-			"LiveKitAudioSource",
 			"LiveKitAudioProcessingModule",
 			"LiveKitScreenCapture",
 		]:

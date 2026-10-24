@@ -49,6 +49,24 @@ func test_audio_source_clear_queue():
 	assert_true(true, "clear_queue on new source should not crash")
 
 
+func test_audio_source_reports_queued_audio_until_cleared():
+	var source = LiveKitAudioSource.create(48000, 1, 500)
+	for i in 10:
+		source.capture_frame(_tone_frame(), 48000, 1, 480)
+	var queued := source.get_queued_duration()
+	source.clear_queue()
+	assert_eq([queued > 0.0, source.get_queued_duration()], [true, 0.0])
+
+
 func test_audio_source_is_ref_counted():
 	var source = LiveKitAudioSource.create(48000, 1, 0)
 	assert_true(source is RefCounted, "AudioSource should be RefCounted")
+
+
+## Returns 10ms of a 440Hz tone at 48kHz.
+func _tone_frame() -> PackedFloat32Array:
+	var data := PackedFloat32Array()
+	data.resize(480)
+	for i in 480:
+		data[i] = 0.5 * sin(TAU * 440.0 * i / 48000.0)
+	return data

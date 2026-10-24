@@ -1,3 +1,5 @@
+#include "livekit_audio_source.h"
+#include "livekit_audio_stream.h"
 #include "livekit_participant.h"
 #include "livekit_room.h"
 #include "livekit_track.h"
@@ -32,6 +34,7 @@ void initialize_livekit_module(ModuleInitializationLevel p_level) {
 
     // Tracks
     ClassDB::register_class<LiveKitTrack>();
+    ClassDB::register_class<LiveKitLocalAudioTrack>();
     ClassDB::register_class<LiveKitRemoteAudioTrack>();
     ClassDB::register_class<LiveKitRemoteVideoTrack>();
 
@@ -39,6 +42,10 @@ void initialize_livekit_module(ModuleInitializationLevel p_level) {
     ClassDB::register_class<LiveKitTrackPublication>();
     ClassDB::register_class<LiveKitLocalTrackPublication>();
     ClassDB::register_class<LiveKitRemoteTrackPublication>();
+
+    // Streams and sources
+    ClassDB::register_class<LiveKitAudioStream>();
+    ClassDB::register_class<LiveKitAudioSource>();
 }
 
 void uninitialize_livekit_module(ModuleInitializationLevel p_level) {
