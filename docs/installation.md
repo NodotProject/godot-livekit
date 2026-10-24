@@ -49,7 +49,7 @@ Once the build is complete, the compiled dynamic libraries (`.so`, `.dylib`, or 
 
 ## Web
 
-Web exports use a separate build of the extension that implements the same classes on top of [livekit-client](https://github.com/livekit/client-sdk-js), which is embedded in it. Web support is in progress. So far it covers rooms, participants, track publications, data messages, and audio (sources, local audio tracks and streams). Classes that aren't available yet (such as video sources and streams) aren't registered on the web, so `ClassDB.class_exists()` reports them as missing.
+Web exports use a separate build of the extension that implements the same classes on top of [livekit-client](https://github.com/livekit/client-sdk-js), which is embedded in it. Web support is in progress. So far it covers rooms, participants, track publications, data messages, RPC, track stats, and audio (sources, local audio tracks and streams). Classes that aren't available yet (such as video sources and streams) aren't registered on the web, so `ClassDB.class_exists()` reports them as missing.
 
 To export for the web:
 

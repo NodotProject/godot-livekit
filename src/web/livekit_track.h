@@ -58,6 +58,10 @@ public:
     int get_stream_state() const;
 
     void request_stats();
+    // Delivers finished stats requests. Called once per frame.
+    static void poll_stats();
+    // Drops unfinished stats requests, which hold their tracks.
+    static void clear_stats_requests();
 };
 
 class LiveKitLocalAudioTrack : public LiveKitTrack {

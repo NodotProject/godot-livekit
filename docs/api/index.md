@@ -92,7 +92,7 @@ Represents the local user. Handles publishing tracks, data, and RPC.
 *   `publish_track(track: LiveKitTrack, options: Dictionary) -> LiveKitLocalTrackPublication`: Publishes a local track to the room.
 *   `unpublish_track(track_sid: String)`: Unpublishes a track by its SID.
 *   `perform_rpc(destination: String, method: String, payload: String, timeout: float)`: Performs an asynchronous remote procedure call to another participant. The result is delivered via the `rpc_response_received` signal; errors via the `rpc_error` signal.
-*   `register_rpc_method(method: String)`: Registers a method name to receive RPC calls.
+*   `register_rpc_method(method: String)`: Registers a method name to receive RPC calls. Invocations are reported through `rpc_method_invoked`. Replying isn't supported yet, so callers always receive an empty response.
 *   `unregister_rpc_method(method: String)`: Unregisters an RPC method.
 
 **Signals:**

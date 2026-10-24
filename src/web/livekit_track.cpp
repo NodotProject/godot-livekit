@@ -5,7 +5,12 @@
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <unordered_map>
+
 using namespace godot;
+
+// Tracks awaiting stats, by request id. As natively, a request keeps its track alive.
+static std::unordered_map<int, Ref<LiveKitTrack>> stats_requests;
 
 void LiveKitTrack::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_sid"), &LiveKitTrack::get_sid);
@@ -93,7 +98,48 @@ int LiveKitTrack::get_stream_state() const {
 }
 
 void LiveKitTrack::request_stats() {
-    UtilityFunctions::push_error("LiveKitTrack::request_stats: not yet supported on the web");
+    if (!js_id_) {
+        UtilityFunctions::push_error("LiveKitTrack::request_stats: track not bound");
+        return;
+    }
+    Variant request = web_call("track_request_stats", Array::make(js_id_));
+    if (request.get_type() != Variant::NIL) {
+        stats_requests[int(request)] = Ref<LiveKitTrack>(this);
+    }
+}
+
+void LiveKitTrack::poll_stats() {
+    if (stats_requests.empty()) {
+        return;
+    }
+    Array results = web_call("track_take_stats", Array());
+    for (int i = 0; i < results.size(); i++) {
+        Dictionary result = results[i];
+        auto it = stats_requests.find(int(result.get("request", 0)));
+        if (it == stats_requests.end()) {
+            continue;
+        }
+        Ref<LiveKitTrack> track = it->second;
+        stats_requests.erase(it);
+        if (result.has("error")) {
+            UtilityFunctions::push_error("LiveKitTrack::request_stats: error: ", result["error"]);
+            continue;
+        }
+        Array stats = result.get("stats", Array());
+        for (int j = 0; j < stats.size(); j++) {
+            Dictionary entry = stats[j];
+            Array ints = entry.get("__ints", Array());
+            for (int k = 0; k < ints.size(); k++) {
+                entry[ints[k]] = int64_t(entry[ints[k]]);
+            }
+            entry.erase("__ints");
+        }
+        track->emit_signal("stats_received", stats);
+    }
+}
+
+void LiveKitTrack::clear_stats_requests() {
+    stats_requests.clear();
 }
 
 // LiveKitLocalAudioTrack
