@@ -549,6 +549,9 @@
   const streams = new Map();
   // Placeholder publications are held until livekit-client finishes publishing.
   const pendingPublications = new Set();
+  // Source channel counts by track. livekit-client otherwise decides whether to publish stereo
+  // from the track's reported settings, which don't reliably reflect a Web Audio destination's.
+  const sourceChannels = new WeakMap();
 
   function context() {
     if (!audioContext) {
@@ -745,6 +748,8 @@
         capacity: queueMs > 0 ? 0 : ctx.sampleRate * DIRECT_CAPTURE_SECONDS,
         destination: ctx.createMediaStreamDestination(),
       };
+      // Destinations default to stereo, which would upmix a mono source.
+      s.destination.channelCount = s.channels;
       sources.set(id, s);
       workletsReady.then(() => {
         if (sources.get(id) !== s) {
@@ -814,6 +819,7 @@
       const track = new LK.LocalAudioTrack(mediaTrack, undefined, true, context());
       track.name = name || '';
       track.source = LK.Track.Source.Microphone;
+      sourceChannels.set(track, s.channels);
       return trackInfo(track);
     },
 
@@ -835,6 +841,9 @@
       if ('source' in options) {
         publishOptions.source = sourceNames[options.source] || 'unknown';
         track.source = publishOptions.source;
+      }
+      if (sourceChannels.has(track)) {
+        publishOptions.forceStereo = sourceChannels.get(track) === 2;
       }
       for (const key of ['dtx', 'red', 'simulcast']) {
         if (key in options) {
