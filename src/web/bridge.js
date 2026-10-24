@@ -486,6 +486,9 @@
       // Registering again replaces the handler, as natively; livekit-client would throw.
       room.unregisterRpcMethod(method);
       room.registerRpcMethod(method, (data) => {
+        if (r.room !== room) {
+          return Promise.resolve('');
+        }
         push(r, {
           type: 'rpc_method_invoked',
           method,
