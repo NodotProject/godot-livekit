@@ -1884,6 +1884,8 @@
   function stopScreenCapture(st) {
     const c = st.capture;
     c.wanted = false;
+    // A share the user is still choosing is stopped once chosen.
+    c.request++;
     if (c.stream) {
       c.stream.getTracks().forEach((track) => track.stop());
       c.stream = null;
@@ -1898,7 +1900,7 @@
 
     screen_capture_create() {
       const [id, st] = newVideoStream();
-      st.capture = { stream: null, wanted: false, paused: false };
+      st.capture = { stream: null, wanted: false, paused: false, request: 0 };
       return id;
     },
 
@@ -1909,10 +1911,11 @@
         return;
       }
       c.wanted = true;
+      const request = ++c.request;
       navigator.mediaDevices.getDisplayMedia({ video: true, audio: false }).then(
         (stream) => {
           // Stopped (or closed) while the user was choosing.
-          if (!c.wanted || st.closed) {
+          if (c.request !== request || st.closed) {
             stream.getTracks().forEach((track) => track.stop());
             return;
           }
@@ -1922,7 +1925,9 @@
           playVideo(st, (el) => (el.srcObject = stream));
         },
         (e) => {
-          c.wanted = false;
+          if (c.request === request) {
+            c.wanted = false;
+          }
           // Most often, the user declined to share.
           warn('starting screen capture')(e);
         },
