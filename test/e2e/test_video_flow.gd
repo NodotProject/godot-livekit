@@ -45,3 +45,5 @@ func test_published_video_reaches_remote_room():
 		"Room2 should receive red frames (got %d frames, center %s)" % [state.frames, center],
 	)
 	state.stream.close()
+	# The frame_received handler captures state, so this breaks their cycle.
+	state.stream = null

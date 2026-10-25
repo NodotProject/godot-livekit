@@ -983,13 +983,24 @@
       publishedTracks.add(track);
       const pubId = idOf(placeholder);
       lp.publishTrack(track, publishOptions)
-        .then((pub) => {
-          promote(pubId, placeholder, pub);
-          const source = videoCaptureTracks.get(track.mediaStreamTrack);
-          if (source) {
-            resendVideoFrames(source, track.mediaStreamTrack);
-          }
-        })
+        .then(
+          (pub) => {
+            promote(pubId, placeholder, pub);
+            const source = videoCaptureTracks.get(track.mediaStreamTrack);
+            if (source) {
+              resendVideoFrames(source, track.mediaStreamTrack);
+            }
+          },
+          (e) => {
+            pendingPublications.delete(placeholder);
+            // Nothing owns the track after all, unless another attempt to publish it is pending.
+            if (![...pendingPublications].some((p) => p.track === track)) {
+              publishedTracks.delete(track);
+              stopIfReleased(track);
+            }
+            throw e;
+          },
+        )
         .catch(warn('publish_track'))
         .finally(() => pendingPublications.delete(placeholder));
       return publicationInfo(placeholder);
@@ -1123,32 +1134,45 @@
   // newest frame if it hasn't been yet.
   function videoStreamPrepare(id) {
     const st = videoStreams.get(id);
-    const el = st && st.element;
-    if (st && st.ready) {
-      return [st.ready.width, st.ready.height];
+    if (!st) {
+      return null;
     }
+    if (!st.ready) {
+      captureVideoFrame(st, false);
+    }
+    return st.ready ? [st.ready.width, st.ready.height] : null;
+  }
+
+  // Captures the stream's newest frame if it hasn't been yet, unless asyncOnly and that would
+  // block on the canvas.
+  function captureVideoFrame(st, asyncOnly) {
+    const el = st.element;
     // HAVE_CURRENT_DATA: a frame can be drawn.
     if (!el || st.copying || el.readyState < 2 || !el.videoWidth) {
-      return null;
+      return;
     }
     if (st.frameCallbacks) {
       if (!st.fresh) {
-        return null;
+        return;
       }
     } else if (el.currentTime === st.lastTime) {
-      return null;
+      return;
+    }
+    if (videoFrameCopies && copyVideoFrame(st, el)) {
+      st.fresh = false;
+      st.lastTime = el.currentTime;
+      return;
+    }
+    if (asyncOnly) {
+      return;
     }
     st.fresh = false;
     st.lastTime = el.currentTime;
-    if (videoFrameCopies && copyVideoFrame(st, el)) {
-      return null;
-    }
     const width = el.videoWidth;
     const height = el.videoHeight;
     resize(st.canvas, width, height);
     st.ctx.drawImage(el, 0, 0, width, height);
     st.ready = { pixels: st.ctx.getImageData(0, 0, width, height).data, width, height };
-    return [width, height];
   }
 
   // Starts converting el's current frame to RGBA without blocking the game, as getImageData
@@ -1214,6 +1238,9 @@
     if (st && st.ready) {
       heap.set(st.ready.pixels, offset);
       st.ready = null;
+      // The pixels are in the heap, so the next frame's conversion can start now rather than on
+      // the next poll, which would halve the frame rate.
+      captureVideoFrame(st, true);
     }
   }
 
