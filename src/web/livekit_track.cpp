@@ -55,6 +55,8 @@ Ref<LiveKitTrack> LiveKitTrack::from_info(const Dictionary &p_info, bool p_remot
         track = Ref<LiveKitTrack>(memnew(LiveKitRemoteVideoTrack));
     } else if (!p_remote && kind == KIND_AUDIO) {
         track = Ref<LiveKitTrack>(memnew(LiveKitLocalAudioTrack));
+    } else if (!p_remote && kind == KIND_VIDEO) {
+        track = Ref<LiveKitTrack>(memnew(LiveKitLocalVideoTrack));
     } else {
         track.instantiate();
     }
@@ -173,6 +175,50 @@ void LiveKitLocalAudioTrack::mute() {
 }
 
 void LiveKitLocalAudioTrack::unmute() {
+    if (js_id_) {
+        web_call("track_set_muted", Array::make(js_id_, false));
+    }
+}
+
+// LiveKitLocalVideoTrack
+
+void LiveKitLocalVideoTrack::_bind_methods() {
+    ClassDB::bind_static_method("LiveKitLocalVideoTrack", D_METHOD("create", "name", "source"), &LiveKitLocalVideoTrack::create);
+    ClassDB::bind_method(D_METHOD("mute"), &LiveKitLocalVideoTrack::mute);
+    ClassDB::bind_method(D_METHOD("unmute"), &LiveKitLocalVideoTrack::unmute);
+}
+
+LiveKitLocalVideoTrack::~LiveKitLocalVideoTrack() {
+    // The browser keeps a canvas capture track running until it's stopped.
+    if (created_ && js_id_) {
+        web_call("local_video_track_release", Array::make(js_id_));
+    }
+}
+
+Ref<LiveKitLocalVideoTrack> LiveKitLocalVideoTrack::create(const String &name, const Ref<LiveKitVideoSource> &source) {
+    if (source.is_null()) {
+        UtilityFunctions::push_error("LiveKitLocalVideoTrack::create: source is null");
+        return Ref<LiveKitLocalVideoTrack>();
+    }
+    Dictionary info = web_call_dict("local_video_track_create", Array::make(source->get_js_id(), name));
+    if (info.is_empty()) {
+        return Ref<LiveKitLocalVideoTrack>();
+    }
+    Ref<LiveKitLocalVideoTrack> track = LiveKitTrack::from_info(info, false);
+    if (track.is_valid()) {
+        track->source_ = source;
+        track->created_ = true;
+    }
+    return track;
+}
+
+void LiveKitLocalVideoTrack::mute() {
+    if (js_id_) {
+        web_call("track_set_muted", Array::make(js_id_, true));
+    }
+}
+
+void LiveKitLocalVideoTrack::unmute() {
     if (js_id_) {
         web_call("track_set_muted", Array::make(js_id_, false));
     }

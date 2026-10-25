@@ -980,9 +980,32 @@
       // livekit-client publishes asynchronously, so a placeholder stands in until it's done.
       const placeholder = { pending: true, track };
       pendingPublications.add(placeholder);
+      publishedTracks.add(track);
       const pubId = idOf(placeholder);
       lp.publishTrack(track, publishOptions)
-        .then((pub) => promote(pubId, placeholder, pub))
+        .then(
+          (pub) => {
+            promote(pubId, placeholder, pub);
+            const source = videoCaptureTracks.get(track.mediaStreamTrack);
+            if (source) {
+              resendVideoFrames(source, track.mediaStreamTrack);
+            }
+          },
+          (e) => {
+            pendingPublications.delete(placeholder);
+            // Nothing owns the track after all, unless it's published or being published elsewhere.
+            const owned =
+              [...pendingPublications].some((p) => p.track === track) ||
+              [...rooms.values()].some(
+                (r) => r.room && [...r.room.localParticipant.trackPublications.values()].some((p) => p.track === track),
+              );
+            if (!owned) {
+              publishedTracks.delete(track);
+              stopIfReleased(track);
+            }
+            throw e;
+          },
+        )
         .catch(warn('publish_track'))
         .finally(() => pendingPublications.delete(placeholder));
       return publicationInfo(placeholder);
@@ -1033,6 +1056,370 @@
     },
   });
 
+  // --- Video ---
+  //
+  // Captured frames are drawn onto a canvas whose captureStream() tracks are published. Remote
+  // tracks play in hidden video elements, and polling reads their newest frame with
+  // VideoFrame.copyTo where browsers can convert to RGBA, or through a canvas otherwise.
+
+  const videoSources = new Map();
+  const videoStreams = new Map();
+  // Local video tracks' canvas capture tracks, mapped to their sources.
+  const videoCaptureTracks = new WeakMap();
+  // Local video tracks whose creating wrapper is gone, and those that have been published.
+  const releasedTracks = new WeakSet();
+  const publishedTracks = new WeakSet();
+  const RESEND_INTERVAL_MS = 200;
+  const RESEND_DURATION_MS = 3000;
+  // Whether VideoFrame.copyTo can convert frames to RGBA, until a browser shows it can't.
+  let videoFrameCopies = typeof VideoFrame === 'function';
+
+  // Called directly (not through `call`) with rgba viewing the wasm heap.
+  function videoSourceCapture(id, rgba, width, height, rotation) {
+    const s = videoSources.get(id);
+    if (!s) {
+      return;
+    }
+    const image = new ImageData(new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, rgba.length), width, height);
+    const quarterTurn = rotation === 90 || rotation === 270;
+    resize(s.canvas, quarterTurn ? height : width, quarterTurn ? width : height);
+    if (rotation === 90 || rotation === 180 || rotation === 270) {
+      // Browsers can't send rotation as metadata the way native WebRTC does, so the pixels turn.
+      resize(s.scratch, width, height);
+      s.scratch.getContext('2d').putImageData(image, 0, 0);
+      // drawImage blends, so transparent pixels would otherwise keep the previous frame's.
+      s.ctx.clearRect(0, 0, s.canvas.width, s.canvas.height);
+      s.ctx.save();
+      s.ctx.translate(s.canvas.width / 2, s.canvas.height / 2);
+      s.ctx.rotate((rotation * Math.PI) / 180);
+      s.ctx.drawImage(s.scratch, -width / 2, -height / 2);
+      s.ctx.restore();
+    } else {
+      s.ctx.putImageData(image, 0, 0);
+    }
+    s.captures++;
+    for (const track of s.tracks) {
+      if (track.readyState === 'ended') {
+        s.tracks.delete(track);
+      } else {
+        track.requestFrame();
+      }
+    }
+  }
+
+  // The server only announces a track once its media arrives, and a canvas track only sends a
+  // frame when one is requested after the canvas changes. So until the game captures a frame, a
+  // newly published track resends the source's current one.
+  function resendVideoFrames(s, track) {
+    const captures = s.captures;
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (s.captures !== captures || track.readyState === 'ended' || Date.now() - started > RESEND_DURATION_MS) {
+        clearInterval(timer);
+        return;
+      }
+      // Drawing the canvas onto itself counts as a change. Copying rather than blending keeps
+      // transparent pixels as they are.
+      s.ctx.save();
+      s.ctx.globalCompositeOperation = 'copy';
+      s.ctx.drawImage(s.canvas, 0, 0);
+      s.ctx.restore();
+      track.requestFrame();
+    }, RESEND_INTERVAL_MS);
+  }
+
+  function resize(canvas, width, height) {
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+  }
+
+  // Returns the [width, height] of a stream frame that's ready to read, starting to capture the
+  // newest frame if it hasn't been yet.
+  function videoStreamPrepare(id) {
+    const st = videoStreams.get(id);
+    if (!st) {
+      return null;
+    }
+    if (!st.ready) {
+      captureVideoFrame(st, false);
+    }
+    return st.ready ? [st.ready.width, st.ready.height] : null;
+  }
+
+  // Captures the stream's newest frame if it hasn't been yet, unless asyncOnly and that would
+  // block on the canvas.
+  function captureVideoFrame(st, asyncOnly) {
+    const el = st.element;
+    // HAVE_CURRENT_DATA: a frame can be drawn.
+    if (!el || st.copying || el.readyState < 2 || !el.videoWidth) {
+      return;
+    }
+    if (st.frameCallbacks) {
+      if (!st.fresh) {
+        return;
+      }
+    } else if (el.currentTime === st.lastTime) {
+      return;
+    }
+    if (videoFrameCopies && copyVideoFrame(st, el)) {
+      st.fresh = false;
+      st.lastTime = el.currentTime;
+      return;
+    }
+    if (asyncOnly) {
+      return;
+    }
+    st.fresh = false;
+    st.lastTime = el.currentTime;
+    const width = el.videoWidth;
+    const height = el.videoHeight;
+    resize(st.canvas, width, height);
+    st.ctx.drawImage(el, 0, 0, width, height);
+    st.ready = { pixels: st.ctx.getImageData(0, 0, width, height).data, width, height };
+  }
+
+  // Starts converting el's current frame to RGBA without blocking the game, as getImageData
+  // does, returning false if this frame needs the canvas instead. The result is ready on a
+  // later poll.
+  function copyVideoFrame(st, el) {
+    let frame;
+    try {
+      frame = new VideoFrame(el);
+    } catch (e) {
+      return false;
+    }
+    const { width, height } = frame.visibleRect;
+    // Drawing the element applies these, but copyTo doesn't.
+    if (frame.rotation || frame.flip || frame.displayWidth !== width || frame.displayHeight !== height) {
+      frame.close();
+      return false;
+    }
+    const size = width * height * 4;
+    // Browsers that can't convert ignore the format option and copy the frame's own layout, which
+    // can also take four bytes per pixel (e.g. BGRA). Reading the option shows it's recognized.
+    let recognized = false;
+    const options = {
+      get format() {
+        recognized = true;
+        return 'RGBA';
+      },
+    };
+    let supported = false;
+    try {
+      supported = frame.allocationSize(options) === size && recognized;
+    } catch (e) {}
+    if (!supported) {
+      videoFrameCopies = false;
+      frame.close();
+      return false;
+    }
+    if (!st.buffer || st.buffer.length !== size) {
+      st.buffer = new Uint8Array(size);
+    }
+    const pixels = st.buffer;
+    st.copying = true;
+    frame
+      .copyTo(pixels, { format: 'RGBA' })
+      .then(
+        () => {
+          if (st.element === el) {
+            st.ready = { pixels, width, height };
+          }
+        },
+        () => {
+          // The canvas still works, so later frames and this one, read again, go through it.
+          videoFrameCopies = false;
+          if (st.element === el) {
+            st.fresh = true;
+            st.lastTime = -1;
+          }
+        },
+      )
+      .finally(() => {
+        frame.close();
+        st.copying = false;
+      });
+    return true;
+  }
+
+  // Copies the frame from videoStreamPrepare into heap (a Uint8Array) at offset.
+  function videoStreamRead(id, heap, offset) {
+    const st = videoStreams.get(id);
+    if (st && st.ready) {
+      heap.set(st.ready.pixels, offset);
+      st.ready = null;
+      // The pixels are in the heap, so the next frame's conversion can start now rather than on
+      // the next poll, which would halve the frame rate.
+      captureVideoFrame(st, true);
+    }
+  }
+
+  function attachVideo(st, track) {
+    if (st.closed || st.track === track || !track.mediaStreamTrack) {
+      return;
+    }
+    detachVideo(st);
+    st.track = track;
+    const el = document.createElement('video');
+    el.muted = true;
+    el.playsInline = true;
+    // In the document but out of sight, since browsers needn't decode video that isn't.
+    Object.assign(el.style, {
+      position: 'fixed',
+      left: '0',
+      top: '0',
+      width: '1px',
+      height: '1px',
+      opacity: '0',
+      pointerEvents: 'none',
+    });
+    document.body.appendChild(el);
+    // Through the SDK, so that it detaches the element when the track is unsubscribed. Otherwise a
+    // recycled receiver could show another track's video.
+    track.attach(el);
+    el.play().catch(() => {});
+    st.element = el;
+    st.fresh = false;
+    st.lastTime = -1;
+    st.frameCallbacks = typeof el.requestVideoFrameCallback === 'function';
+    if (st.frameCallbacks) {
+      const onFrame = () => {
+        if (st.element === el) {
+          st.fresh = true;
+          el.requestVideoFrameCallback(onFrame);
+        }
+      };
+      el.requestVideoFrameCallback(onFrame);
+    }
+  }
+
+  function detachVideo(st) {
+    const track = st.track;
+    if (st.element) {
+      track.detach(st.element);
+      st.element.remove();
+    }
+    st.track = st.element = st.ready = null;
+    if (track) {
+      stopIfReleased(track);
+    }
+  }
+
+  function stopIfReleased(track) {
+    if (!releasedTracks.has(track) || publishedTracks.has(track)) {
+      return;
+    }
+    for (const st of videoStreams.values()) {
+      if (st.track === track) {
+        return;
+      }
+    }
+    const s = videoCaptureTracks.get(track.mediaStreamTrack);
+    if (s) {
+      s.tracks.delete(track.mediaStreamTrack);
+    }
+    track.stop();
+  }
+
+  function newVideoStream() {
+    const id = nextId++;
+    const canvas = document.createElement('canvas');
+    const st = { canvas, ctx: canvas.getContext('2d', { willReadFrequently: true }), closed: false };
+    videoStreams.set(id, st);
+    return [id, st];
+  }
+
+  Object.assign(api, {
+    video_source_create(width, height) {
+      const id = nextId++;
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, width);
+      canvas.height = Math.max(1, height);
+      const ctx = canvas.getContext('2d');
+      // Black (rather than transparent) until the first capture, as a new native source sends.
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      videoSources.set(id, {
+        canvas,
+        ctx,
+        scratch: document.createElement('canvas'),
+        tracks: new Set(),
+        captures: 0,
+      });
+      return id;
+    },
+
+    video_source_destroy(id) {
+      videoSources.delete(id);
+    },
+
+    local_video_track_create(sourceId, name) {
+      const s = videoSources.get(sourceId);
+      if (!s) {
+        throw new Error('invalid video source');
+      }
+      // A capture track per local track, so that each can be muted or stopped on its own.
+      const mediaTrack = s.canvas.captureStream(0).getVideoTracks()[0];
+      s.tracks.add(mediaTrack);
+      videoCaptureTracks.set(mediaTrack, s);
+      const track = new LK.LocalVideoTrack(mediaTrack, undefined, true);
+      track.name = name || '';
+      track.source = LK.Track.Source.Camera;
+      return trackInfo(track);
+    },
+
+    // Stops a created local video track once nothing will use it. Tracks that have been published
+    // are left to the SDK, which stops them when they're unpublished.
+    local_video_track_release(trackId) {
+      const track = objectOf(trackId);
+      if (track) {
+        releasedTracks.add(track);
+        stopIfReleased(track);
+      }
+    },
+
+    video_stream_from_track(trackId) {
+      const track = objectOf(trackId);
+      if (!track || track.kind !== 'video') {
+        throw new Error('invalid track');
+      }
+      const [id, st] = newVideoStream();
+      attachVideo(st, track);
+      return id;
+    },
+
+    video_stream_from_participant(roomId, participantId, source) {
+      const participant = remoteParticipantOf(roomId, participantId);
+      const sourceName = ['unknown', 'camera', 'microphone', 'screen_share', 'screen_share_audio'][source];
+      const [id, st] = newVideoStream();
+      const matches = (track) => track && track.kind === 'video' && track.source === sourceName;
+      for (const pub of participant.trackPublications.values()) {
+        if (matches(pub.track)) {
+          attachVideo(st, pub.track);
+        }
+      }
+      // Like the native binding, the stream follows the participant's track for that source.
+      st.onSubscribed = (track) => matches(track) && attachVideo(st, track);
+      participant.on(LK.ParticipantEvent.TrackSubscribed, st.onSubscribed);
+      st.participant = participant;
+      return id;
+    },
+
+    video_stream_close(id) {
+      const st = videoStreams.get(id);
+      if (st) {
+        st.closed = true;
+        detachVideo(st);
+        if (st.participant) {
+          st.participant.off(LK.ParticipantEvent.TrackSubscribed, st.onSubscribed);
+        }
+        videoStreams.delete(id);
+      }
+    },
+  });
+
   window.GodotLiveKit = {
     // Returns JSON for C++. Errors are reported as {"__error": message} rather than thrown into wasm.
     call(name, argsJson) {
@@ -1048,5 +1435,8 @@
     objectOf,
     sourceCapture,
     streamRead,
+    videoSourceCapture,
+    videoStreamPrepare,
+    videoStreamRead,
   };
 })();

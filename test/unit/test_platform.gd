@@ -34,11 +34,8 @@ func test_all_classes_registered():
 	]
 
 	if OS.has_feature("web"):
-		# Not implemented on the web yet.
+		# Browsers don't expose these.
 		for cls in [
-			"LiveKitLocalVideoTrack",
-			"LiveKitVideoStream",
-			"LiveKitVideoSource",
 			"LiveKitAudioProcessingModule",
 			"LiveKitScreenCapture",
 		]:

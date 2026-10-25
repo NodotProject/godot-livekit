@@ -4,6 +4,8 @@
 #include "livekit_room.h"
 #include "livekit_track.h"
 #include "livekit_track_publication.h"
+#include "livekit_video_source.h"
+#include "livekit_video_stream.h"
 
 #include <gdextension_interface.h>
 #include <godot_cpp/core/class_db.hpp>
@@ -17,6 +19,7 @@ using namespace godot;
 
 static void livekit_frame_callback() {
     LiveKitRoom::poll_all();
+    LiveKitVideoStream::poll_all();
     LiveKitTrack::poll_stats();
 }
 
@@ -36,6 +39,7 @@ void initialize_livekit_module(ModuleInitializationLevel p_level) {
     // Tracks
     ClassDB::register_class<LiveKitTrack>();
     ClassDB::register_class<LiveKitLocalAudioTrack>();
+    ClassDB::register_class<LiveKitLocalVideoTrack>();
     ClassDB::register_class<LiveKitRemoteAudioTrack>();
     ClassDB::register_class<LiveKitRemoteVideoTrack>();
 
@@ -45,7 +49,9 @@ void initialize_livekit_module(ModuleInitializationLevel p_level) {
     ClassDB::register_class<LiveKitRemoteTrackPublication>();
 
     // Streams and sources
+    ClassDB::register_class<LiveKitVideoStream>();
     ClassDB::register_class<LiveKitAudioStream>();
+    ClassDB::register_class<LiveKitVideoSource>();
     ClassDB::register_class<LiveKitAudioSource>();
 }
 
