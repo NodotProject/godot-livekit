@@ -166,8 +166,14 @@ func test_encryption_turned_off_and_on_again_stays_on():
 	# Room2 can only decode the video if it isn't encrypted.
 	var video := _publish_red_video()
 	var frames := await _count_red_frames(video, 1, 8.0)
+	# Once room2 has the key, data gets through too.
+	var received := []
+	_room2.data_received.connect(func(data, _participant, _kind, _topic): received.append(data.get_string_from_utf8()))
+	_room2.get_e2ee_manager().get_key_provider().set_shared_key(KEY.to_utf8_buffer(), 0)
+	_room.get_local_participant().publish_data("secret".to_utf8_buffer(), true)
+	await _poll_both(func(): return not received.is_empty(), 5.0)
 
-	assert_eq([manager.get_enabled(), video.subscribed, frames], [true, true, 0])
+	assert_eq([manager.get_enabled(), video.subscribed, frames, received], [true, true, 0, ["secret"]])
 	_close(video)
 
 

@@ -862,10 +862,11 @@
     e2ee_set_enabled(e2eeId, enabled) {
       const e = e2eeOf(e2eeId);
       const room = e2eeRoomOf(e);
-      e.enabled = !!enabled;
+      const encrypting = !!enabled;
+      e.enabled = encrypting;
       // livekit-client switches the local participant's cryptor too.
       e.cryptorsEnabled.delete(room.localParticipant.identity);
-      queueEnable(e, 'set_enabled', e.enabled, () => room.setE2EEEnabled(e.enabled));
+      queueEnable(e, 'set_enabled', encrypting, () => room.setE2EEEnabled(encrypting));
     },
 
     e2ee_set_key(e2eeId, identity, b64, keyIndex) {
