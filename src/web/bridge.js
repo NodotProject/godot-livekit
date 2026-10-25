@@ -1228,7 +1228,14 @@
             st.ready = { pixels, width, height };
           }
         },
-        () => {},
+        () => {
+          // The canvas still works, so later frames and this one, read again, go through it.
+          videoFrameCopies = false;
+          if (st.element === el) {
+            st.fresh = true;
+            st.lastTime = -1;
+          }
+        },
       )
       .finally(() => {
         frame.close();
