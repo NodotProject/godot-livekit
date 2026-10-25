@@ -993,8 +993,13 @@
           },
           (e) => {
             pendingPublications.delete(placeholder);
-            // Nothing owns the track after all, unless another attempt to publish it is pending.
-            if (![...pendingPublications].some((p) => p.track === track)) {
+            // Nothing owns the track after all, unless it's published or being published elsewhere.
+            const owned =
+              [...pendingPublications].some((p) => p.track === track) ||
+              [...rooms.values()].some(
+                (r) => r.room && [...r.room.localParticipant.trackPublications.values()].some((p) => p.track === track),
+              );
+            if (!owned) {
               publishedTracks.delete(track);
               stopIfReleased(track);
             }
