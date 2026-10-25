@@ -680,7 +680,8 @@
     // livekit-client takes the salt as a string that it encodes as UTF-8.
     let salt;
     try {
-      salt = new TextDecoder('utf-8', { fatal: true }).decode(fromBase64(options.ratchet_salt));
+      // A leading BOM is part of the salt natively.
+      salt = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(fromBase64(options.ratchet_salt));
     } catch (e) {
       throw new Error('ratchet_salt must be valid UTF-8 on the web');
     }
@@ -819,6 +820,12 @@
     });
   }
 
+  // Resolves once requested changes to whether the local participant encrypts are done, so that
+  // tracks aren't published with the previous setting.
+  function whenEncryptionSettled(r) {
+    return r.e2ee ? r.e2ee.enableUpdates : Promise.resolve();
+  }
+
   function e2eeOf(e2eeId) {
     const e = e2ees.get(e2eeId);
     if (!e) {
@@ -866,7 +873,12 @@
       e.enabled = encrypting;
       // livekit-client switches the local participant's cryptor too.
       e.cryptorsEnabled.delete(room.localParticipant.identity);
-      queueEnable(e, 'set_enabled', encrypting, () => room.setE2EEEnabled(encrypting));
+      // The room skips its update when the worker already matches (after enabling the local
+      // cryptor alone, say), which would leave tracks published as unencrypted, so the local
+      // participant is updated regardless (through livekit-client's internal API).
+      queueEnable(e, 'set_enabled', encrypting, () =>
+        room.localParticipant.setE2EEEnabled(encrypting).then(() => room.setE2EEEnabled(encrypting)),
+      );
     },
 
     e2ee_set_key(e2eeId, identity, b64, keyIndex) {
@@ -1363,7 +1375,8 @@
       pendingPublications.add(placeholder);
       publishedTracks.add(track);
       const pubId = idOf(placeholder);
-      lp.publishTrack(track, publishOptions)
+      whenEncryptionSettled(roomOf(id))
+        .then(() => lp.publishTrack(track, publishOptions))
         .then(
           (pub) => {
             promote(pubId, placeholder, pub);
