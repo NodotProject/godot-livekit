@@ -3,9 +3,26 @@ extends "res://test/e2e/e2e_helper.gd"
 
 const WIDTH := 320
 const HEIGHT := 240
+# A DXT1 block of solid red: two RGB565 endpoints of 0xF800, then all-zero indices.
+const DXT1_RED_BLOCK := [0x00, 0xF8, 0x00, 0xF8, 0, 0, 0, 0]
 
 
 func test_published_video_reaches_remote_room():
+	# A solid color survives encoding well enough to check.
+	var image := Image.create_empty(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
+	image.fill(Color(1.0, 0.0, 0.0))
+	await _assert_remote_room_receives_red(image)
+
+
+func test_compressed_video_frames_are_decompressed():
+	var data := PackedByteArray()
+	for i in (WIDTH / 4) * (HEIGHT / 4):
+		data.append_array(DXT1_RED_BLOCK)
+	await _assert_remote_room_receives_red(Image.create_from_data(WIDTH, HEIGHT, false, Image.FORMAT_DXT1, data))
+
+
+## Publishes image as video from one room and asserts that the other receives red frames.
+func _assert_remote_room_receives_red(image: Image) -> void:
 	if _skip_if_no_server():
 		return
 	assert_true(await _connect_both_rooms(), "Both rooms should connect")
@@ -20,9 +37,6 @@ func test_published_video_reaches_remote_room():
 			state.stream.frame_received.connect(func(): state.frames += 1)
 	)
 
-	# A solid color survives encoding well enough to check.
-	var image := Image.create_empty(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
-	image.fill(Color(1.0, 0.0, 0.0))
 	var start := Time.get_ticks_msec()
 	var last_capture := -1000
 	while Time.get_ticks_msec() - start < 15000 and state.frames < 10:

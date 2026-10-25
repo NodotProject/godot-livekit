@@ -40,6 +40,10 @@ void LiveKitVideoSource::capture_frame(const Ref<Image> &image, int64_t timestam
     Ref<Image> rgba_image = image;
     if (image->get_format() != Image::FORMAT_RGBA8) {
         rgba_image = image->duplicate();
+        // convert() can't change a compressed format, so it would leave the buffer as it was.
+        if (rgba_image->is_compressed()) {
+            rgba_image->decompress();
+        }
         rgba_image->convert(Image::FORMAT_RGBA8);
     }
     int w = rgba_image->get_width();
@@ -48,6 +52,11 @@ void LiveKitVideoSource::capture_frame(const Ref<Image> &image, int64_t timestam
         return;
     }
     PackedByteArray data = rgba_image->get_data();
+    // The bridge reads w * h * 4 bytes, so anything shorter would expose other heap memory.
+    if (rgba_image->get_format() != Image::FORMAT_RGBA8 || data.size() < int64_t(w) * h * 4) {
+        UtilityFunctions::push_error("LiveKitVideoSource::capture_frame: image can't be converted to RGBA8");
+        return;
+    }
     web_video_source_capture(js_id_, data.ptr(), w, h, rotation);
 }
 

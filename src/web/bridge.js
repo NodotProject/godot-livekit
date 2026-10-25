@@ -1190,12 +1190,12 @@
     } catch (e) {
       return false;
     }
+    const { width, height } = frame.visibleRect;
     // Drawing the element applies these, but copyTo doesn't.
-    if (frame.rotation || frame.flip) {
+    if (frame.rotation || frame.flip || frame.displayWidth !== width || frame.displayHeight !== height) {
       frame.close();
       return false;
     }
-    const { width, height } = frame.visibleRect;
     const size = width * height * 4;
     // Browsers that can't convert ignore the format option and copy the frame's own layout, which
     // can also take four bytes per pixel (e.g. BGRA). Reading the option shows it's recognized.
