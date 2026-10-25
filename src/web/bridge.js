@@ -980,6 +980,7 @@
       // livekit-client publishes asynchronously, so a placeholder stands in until it's done.
       const placeholder = { pending: true, track };
       pendingPublications.add(placeholder);
+      publishedTracks.add(track);
       const pubId = idOf(placeholder);
       lp.publishTrack(track, publishOptions)
         .then((pub) => {
@@ -1049,6 +1050,9 @@
   const videoStreams = new Map();
   // Local video tracks' canvas capture tracks, mapped to their sources.
   const videoCaptureTracks = new WeakMap();
+  // Local video tracks whose creating wrapper is gone, and those that have been published.
+  const releasedTracks = new WeakSet();
+  const publishedTracks = new WeakSet();
   const RESEND_INTERVAL_MS = 200;
   const RESEND_DURATION_MS = 3000;
   // Whether VideoFrame.copyTo can convert frames to RGBA, until a browser shows it can't.
@@ -1067,6 +1071,8 @@
       // Browsers can't send rotation as metadata the way native WebRTC does, so the pixels turn.
       resize(s.scratch, width, height);
       s.scratch.getContext('2d').putImageData(image, 0, 0);
+      // drawImage blends, so transparent pixels would otherwise keep the previous frame's.
+      s.ctx.clearRect(0, 0, s.canvas.width, s.canvas.height);
       s.ctx.save();
       s.ctx.translate(s.canvas.width / 2, s.canvas.height / 2);
       s.ctx.rotate((rotation * Math.PI) / 180);
@@ -1096,8 +1102,12 @@
         clearInterval(timer);
         return;
       }
-      // Drawing the canvas onto itself counts as a change without altering it.
+      // Drawing the canvas onto itself counts as a change. Copying rather than blending keeps
+      // transparent pixels as they are.
+      s.ctx.save();
+      s.ctx.globalCompositeOperation = 'copy';
       s.ctx.drawImage(s.canvas, 0, 0);
+      s.ctx.restore();
       track.requestFrame();
     }, RESEND_INTERVAL_MS);
   }
@@ -1158,10 +1168,18 @@
     }
     const { width, height } = frame.visibleRect;
     const size = width * height * 4;
+    // Browsers that can't convert ignore the format option and copy the frame's own layout, which
+    // can also take four bytes per pixel (e.g. BGRA). Reading the option shows it's recognized.
+    let recognized = false;
+    const options = {
+      get format() {
+        recognized = true;
+        return 'RGBA';
+      },
+    };
     let supported = false;
     try {
-      // Older browsers ignore the unknown format option and report the frame's own layout.
-      supported = frame.allocationSize({ format: 'RGBA' }) === size;
+      supported = frame.allocationSize(options) === size && recognized;
     } catch (e) {}
     if (!supported) {
       videoFrameCopies = false;
@@ -1219,7 +1237,9 @@
       pointerEvents: 'none',
     });
     document.body.appendChild(el);
-    el.srcObject = new MediaStream([track.mediaStreamTrack]);
+    // Through the SDK, so that it detaches the element when the track is unsubscribed. Otherwise a
+    // recycled receiver could show another track's video.
+    track.attach(el);
     el.play().catch(() => {});
     st.element = el;
     st.fresh = false;
@@ -1237,11 +1257,31 @@
   }
 
   function detachVideo(st) {
+    const track = st.track;
     if (st.element) {
-      st.element.srcObject = null;
+      track.detach(st.element);
       st.element.remove();
     }
     st.track = st.element = st.ready = null;
+    if (track) {
+      stopIfReleased(track);
+    }
+  }
+
+  function stopIfReleased(track) {
+    if (!releasedTracks.has(track) || publishedTracks.has(track)) {
+      return;
+    }
+    for (const st of videoStreams.values()) {
+      if (st.track === track) {
+        return;
+      }
+    }
+    const s = videoCaptureTracks.get(track.mediaStreamTrack);
+    if (s) {
+      s.tracks.delete(track.mediaStreamTrack);
+    }
+    track.stop();
   }
 
   function newVideoStream() {
@@ -1289,6 +1329,16 @@
       track.name = name || '';
       track.source = LK.Track.Source.Camera;
       return trackInfo(track);
+    },
+
+    // Stops a created local video track once nothing will use it. Tracks that have been published
+    // are left to the SDK, which stops them when they're unpublished.
+    local_video_track_release(trackId) {
+      const track = objectOf(trackId);
+      if (track) {
+        releasedTracks.add(track);
+        stopIfReleased(track);
+      }
     },
 
     video_stream_from_track(trackId) {

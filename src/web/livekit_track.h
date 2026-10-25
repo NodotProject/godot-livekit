@@ -88,6 +88,8 @@ protected:
     static void _bind_methods();
 
 public:
+    ~LiveKitLocalVideoTrack();
+
     static Ref<LiveKitLocalVideoTrack> create(const String &name, const Ref<LiveKitVideoSource> &source);
     void mute();
     void unmute();
@@ -95,6 +97,8 @@ public:
 private:
     // Kept alive for as long as the track, as in the native binding.
     Ref<LiveKitVideoSource> source_;
+    // Whether this wrapper came from create(), rather than standing in for a publication's track.
+    bool created_ = false;
 };
 
 class LiveKitRemoteAudioTrack : public LiveKitTrack {

@@ -188,6 +188,13 @@ void LiveKitLocalVideoTrack::_bind_methods() {
     ClassDB::bind_method(D_METHOD("unmute"), &LiveKitLocalVideoTrack::unmute);
 }
 
+LiveKitLocalVideoTrack::~LiveKitLocalVideoTrack() {
+    // The browser keeps a canvas capture track running until it's stopped.
+    if (created_ && js_id_) {
+        web_call("local_video_track_release", Array::make(js_id_));
+    }
+}
+
 Ref<LiveKitLocalVideoTrack> LiveKitLocalVideoTrack::create(const String &name, const Ref<LiveKitVideoSource> &source) {
     if (source.is_null()) {
         UtilityFunctions::push_error("LiveKitLocalVideoTrack::create: source is null");
@@ -200,6 +207,7 @@ Ref<LiveKitLocalVideoTrack> LiveKitLocalVideoTrack::create(const String &name, c
     Ref<LiveKitLocalVideoTrack> track = LiveKitTrack::from_info(info, false);
     if (track.is_valid()) {
         track->source_ = source;
+        track->created_ = true;
     }
     return track;
 }
