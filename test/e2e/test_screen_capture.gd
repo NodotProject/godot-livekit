@@ -79,6 +79,11 @@ func test_screenshot_one_shot():
 	if capture == null:
 		pending("create() returned null — capture not available")
 		return
+	if OS.has_feature("web"):
+		# Browsers only capture once the user has chosen what to share.
+		capture.set_auto_poll(false)
+		capture.start()
+		await _poll_capture_frame(capture, 10.0)
 
 	var img = capture.screenshot()
 	assert_not_null(img, "screenshot() should return a valid Image")
@@ -157,21 +162,32 @@ func test_capture_pause_resume():
 		capture.close()
 		return
 
-	# Pause and verify
 	capture.pause()
-	assert_true(capture.is_paused(), "Capture should be paused after pause()")
-
-	# Resume and verify
-	capture.resume()
-	assert_false(capture.is_paused(), "Capture should not be paused after resume()")
-
-	# Verify frames still arrive after resume
-	# Clear current image state by polling any pending, then wait for new
+	var paused := capture.is_paused()
+	# A frame captured before pausing may still be pending.
 	capture.poll()
-	var got_frame_after = await _poll_capture_frame(capture, 10.0)
-	assert_true(got_frame_after, "Capture should produce frames after resume")
+	var frames_while_paused := await _count_polled_frames(capture, 1000, 1.0)
 
+	capture.resume()
+	var frames_after_resume := await _count_polled_frames(capture, 1, 10.0)
+
+	assert_eq(
+		[paused, frames_while_paused, capture.is_paused(), frames_after_resume],
+		[true, 0, false, 1],
+		"Capture should only produce frames while not paused",
+	)
 	capture.close()
+
+
+## Polls until count frames have arrived or timeout_sec has passed, returning how many arrived.
+func _count_polled_frames(capture, count: int, timeout_sec: float) -> int:
+	var frames := 0
+	var deadline := Time.get_ticks_msec() + int(timeout_sec * 1000)
+	while frames < count and Time.get_ticks_msec() < deadline:
+		if capture.poll():
+			frames += 1
+		await get_tree().create_timer(0.05).timeout
+	return frames
 
 
 func test_monitor_capture():

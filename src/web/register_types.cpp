@@ -3,6 +3,7 @@
 #include "livekit_e2ee.h"
 #include "livekit_participant.h"
 #include "livekit_room.h"
+#include "livekit_screen_capture.h"
 #include "livekit_track.h"
 #include "livekit_track_publication.h"
 #include "livekit_video_source.h"
@@ -16,11 +17,13 @@
 using namespace godot;
 
 // Web builds implement the classes available in browsers on top of livekit-client. The rest
-// (e.g. screen capture) aren't registered, so ClassDB.class_exists() reports them as missing.
+// (the audio processing module) aren't registered, so ClassDB.class_exists() reports them as
+// missing.
 
 static void livekit_frame_callback() {
     LiveKitRoom::poll_all();
     LiveKitVideoStream::poll_all();
+    LiveKitScreenCapture::poll_all();
     LiveKitTrack::poll_stats();
 }
 
@@ -54,6 +57,9 @@ void initialize_livekit_module(ModuleInitializationLevel p_level) {
     ClassDB::register_class<LiveKitAudioStream>();
     ClassDB::register_class<LiveKitVideoSource>();
     ClassDB::register_class<LiveKitAudioSource>();
+
+    // Screen Capture
+    ClassDB::register_class<LiveKitScreenCapture>();
 
     // E2EE
     ClassDB::register_class<LiveKitE2eeOptions>();
