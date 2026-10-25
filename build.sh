@@ -226,7 +226,7 @@ fetch_livekit() {
 
 # Function to download livekit-client, which the web build embeds
 fetch_livekit_js() {
-    if [ -f "livekit-js/.version" ] && [ "$(cat livekit-js/.version)" = "$LIVEKIT_JS_VERSION" ]; then
+    if [ -f "livekit-js/.version" ] && [ "$(cat livekit-js/.version)" = "$LIVEKIT_JS_VERSION" ] && [ -f "livekit-js/livekit-client.e2ee.worker.js" ]; then
         echo -e "${GREEN}Using cached livekit-client ${LIVEKIT_JS_VERSION}${NC}"
         return 0
     fi
@@ -236,7 +236,7 @@ fetch_livekit_js() {
     verify_checksum "${archive}" "${LIVEKIT_JS_SHA256}"
     rm -rf livekit-js
     mkdir -p livekit-js
-    tar -xzf "${archive}" -C livekit-js --strip-components=2 package/dist/livekit-client.umd.js
+    tar -xzf "${archive}" -C livekit-js --strip-components=2 package/dist/livekit-client.umd.js package/dist/livekit-client.e2ee.worker.js
     tar -xzf "${archive}" -C livekit-js --strip-components=1 package/LICENSE
     rm "${archive}"
     echo "$LIVEKIT_JS_VERSION" > livekit-js/.version

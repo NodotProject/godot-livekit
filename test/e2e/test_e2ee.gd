@@ -1,0 +1,349 @@
+extends "res://test/e2e/e2e_helper.gd"
+## E2E: end-to-end encrypted media and data reach only rooms with the right key.
+
+const WIDTH := 320
+const HEIGHT := 240
+const KEY := "correct horse battery staple"
+
+
+func test_encrypted_media_and_data_reach_room_with_same_key():
+	if _skip_if_unsupported():
+		return
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
+	var statuses := {}
+	_room2.participant_encryption_status_changed.connect(func(participant, is_encrypted):
+		statuses[participant.get_identity()] = is_encrypted
+	)
+	var received := []
+	_room2.data_received.connect(func(data, _participant, _kind, _topic): received.append(data.get_string_from_utf8()))
+
+	var video := _publish_red_video()
+	_room.get_local_participant().publish_data("secret".to_utf8_buffer(), true)
+	var frames := await _count_red_frames(video, 10, 15.0)
+
+	var manager: LiveKitE2eeManager = _room.get_e2ee_manager()
+	assert_eq(
+		[frames >= 10, received, statuses.get("e2e-user-1"), manager.get_enabled(), manager.get_key_provider().get_shared_key()],
+		[true, ["secret"], true, true, KEY.to_utf8_buffer()],
+	)
+	_close(video)
+
+
+func test_room_with_a_different_key_cannot_decode():
+	if _skip_if_unsupported():
+		return
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options("wrong key")), "Both rooms should connect")
+	var received := []
+	_room2.data_received.connect(func(data, _participant, _kind, _topic): received.append(data))
+
+	var video := _publish_red_video()
+	_room.get_local_participant().publish_data("secret".to_utf8_buffer(), true)
+	var frames := await _count_red_frames(video, 1, 8.0)
+
+	assert_eq([video.subscribed, frames, received], [true, 0, []])
+	_close(video)
+
+
+func test_rotated_key_is_used_once_switched_to():
+	if _skip_if_unsupported():
+		return
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
+	var video := _publish_red_video()
+	assert_true(await _count_red_frames(video, 5, 15.0) >= 5, "Room2 should decode the first key's frames")
+
+	# Rotate to a key that room2 doesn't have yet. Room1's frames stop decoding once it switches...
+	var next_key := "next key".to_utf8_buffer()
+	var key_provider := _room.get_e2ee_manager().get_key_provider()
+	key_provider.set_shared_key(next_key, 1)
+	assert_eq(key_provider.get_shared_key(1), next_key)
+	var cryptors := _room.get_e2ee_manager().get_frame_cryptors().filter(func(cryptor):
+		return cryptor.get_participant_identity() == "e2e-user-1"
+	)
+	assert_false(cryptors.is_empty(), "Room1 should have a frame cryptor for its track")
+	for cryptor in cryptors:
+		cryptor.set_key_index(1)
+	# (Frames encrypted before the switch may still be in flight.)
+	await _count_red_frames(video, 1000, 1.0)
+	var frames_before_room2_has_key := await _count_red_frames(video, 1, 3.0)
+
+	# ...and resume once room2 has it too.
+	_room2.get_e2ee_manager().get_key_provider().set_shared_key(next_key, 1)
+	var frames_after := await _count_red_frames(video, 5, 10.0)
+
+	assert_eq([frames_before_room2_has_key, frames_after >= 5], [0, true])
+	_close(video)
+
+
+func test_data_sent_right_after_switching_keys_uses_the_new_key():
+	if _skip_if_unsupported():
+		return
+	# Room2 can only decrypt the key room1 switches to.
+	var next_key := "next key".to_utf8_buffer()
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options("old key unknown to room2")), "Both rooms should connect")
+	_room2.get_e2ee_manager().get_key_provider().set_shared_key(next_key, 1)
+	var received := []
+	_room2.data_received.connect(func(data, _participant, _kind, _topic): received.append(data.get_string_from_utf8()))
+	# Frame cryptors (which switch keys) only exist for tracks.
+	var video := _publish_red_video()
+	await _count_red_frames(video, 1000, 1.0)
+
+	_room.get_e2ee_manager().get_key_provider().set_shared_key(next_key, 1)
+	for cryptor in _room.get_e2ee_manager().get_frame_cryptors():
+		cryptor.set_key_index(1)
+	_room.get_local_participant().publish_data("secret".to_utf8_buffer(), true)
+	await _poll_both(func(): return not received.is_empty(), 5.0)
+
+	assert_eq(received, ["secret"])
+	_close(video)
+
+
+func test_data_sent_just_before_switching_keys_is_delivered():
+	if _skip_if_unsupported():
+		return
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
+	var next_key := "next key".to_utf8_buffer()
+	_room2.get_e2ee_manager().get_key_provider().set_shared_key(next_key, 1)
+	var received := []
+	_room2.data_received.connect(func(data, _participant, _kind, _topic): received.append(data.get_string_from_utf8()))
+	# Frame cryptors (which switch keys) only exist for tracks.
+	var video := _publish_red_video()
+	assert_true(await _count_red_frames(video, 1, 15.0) >= 1, "Room2 should receive video")
+
+	_room.get_local_participant().publish_data("secret".to_utf8_buffer(), true)
+	_room.get_e2ee_manager().get_key_provider().set_shared_key(next_key, 1)
+	for cryptor in _room.get_e2ee_manager().get_frame_cryptors():
+		cryptor.set_key_index(1)
+	await _poll_both(func(): return not received.is_empty(), 5.0)
+
+	assert_eq(received, ["secret"])
+	_close(video)
+
+
+func test_key_changes_requested_together_each_take_effect():
+	if _skip_if_unsupported():
+		return
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
+	# Frame cryptors (which switch keys) only exist for tracks.
+	var video := _publish_red_video()
+	assert_true(await _count_red_frames(video, 1, 15.0) >= 1, "Room2 should receive video")
+	var key_provider := _room.get_e2ee_manager().get_key_provider()
+	var key := KEY.to_utf8_buffer()
+	key_provider.set_shared_key(key, 1)
+	key_provider.ratchet_shared_key(1)
+	key_provider.ratchet_shared_key(1)
+	key_provider.set_shared_key(key, 3)
+	key_provider.ratchet_shared_key(3)
+	for cryptor in _room.get_e2ee_manager().get_frame_cryptors():
+		cryptor.set_key_index(3)
+	# The same ratchets, one at a time.
+	key_provider.set_shared_key(key, 2)
+	key_provider.ratchet_shared_key(2)
+	var once := await _await_key_change(key_provider, 2, key)
+	key_provider.ratchet_shared_key(2)
+	var twice := await _await_key_change(key_provider, 2, once)
+
+	assert_eq([twice.size(), key_provider.get_shared_key(1), key_provider.get_shared_key(3)], [32, twice, once])
+	_close(video)
+
+
+## Waits for the shared key at key_index to stop being old_key, and returns it.
+func _await_key_change(key_provider: LiveKitKeyProvider, key_index: int, old_key: PackedByteArray) -> PackedByteArray:
+	var deadline := Time.get_ticks_msec() + 5000
+	while key_provider.get_shared_key(key_index) == old_key and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	return key_provider.get_shared_key(key_index)
+
+
+func test_receiver_follows_a_ratcheted_key():
+	if _skip_if_unsupported():
+		return
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
+	var video := _publish_red_video()
+	assert_true(await _count_red_frames(video, 5, 15.0) >= 5, "Room2 should decode the first key's frames")
+
+	# Room2 isn't told, but tries ratcheting its own key when frames stop decrypting.
+	var key_provider := _room.get_e2ee_manager().get_key_provider()
+	var ratcheted := key_provider.ratchet_shared_key()
+	var deadline := Time.get_ticks_msec() + 5000
+	while key_provider.get_shared_key() == KEY.to_utf8_buffer() and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	var new_key := key_provider.get_shared_key()
+	var frames_after := await _count_red_frames(video, 5, 10.0)
+
+	# The ratcheted key is returned natively, but on the web it's only available once ready.
+	assert_eq(
+		[new_key.size(), new_key != KEY.to_utf8_buffer(), ratcheted.is_empty() or ratcheted == new_key, frames_after >= 5],
+		[32, true, true, true],
+	)
+	_close(video)
+
+
+func test_receiver_records_a_participant_key_it_ratcheted():
+	if _skip_if_unsupported():
+		return
+	var no_shared_key := {"e2ee": LiveKitE2eeOptions.new()}
+	assert_true(await _connect_both_rooms(no_shared_key, {"e2ee": LiveKitE2eeOptions.new()}), "Both rooms should connect")
+	var key := KEY.to_utf8_buffer()
+	var room1_keys := _room.get_e2ee_manager().get_key_provider()
+	var room2_keys := _room2.get_e2ee_manager().get_key_provider()
+	room1_keys.set_key("e2e-user-1", key, 0)
+	room2_keys.set_key("e2e-user-1", key, 0)
+	var video := _publish_red_video()
+	assert_true(await _count_red_frames(video, 5, 15.0) >= 5, "Room2 should decode the first key's frames")
+
+	room1_keys.ratchet_key("e2e-user-1", 0)
+	var deadline := Time.get_ticks_msec() + 5000
+	while room1_keys.get_key("e2e-user-1", 0) == key and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	var new_key := room1_keys.get_key("e2e-user-1", 0)
+	# Room2 ratchets once frames stop decrypting, and reports the new key a little later.
+	var frames_after := await _count_red_frames(video, 5, 10.0)
+	await _poll_both(func(): return room2_keys.get_key("e2e-user-1", 0) == new_key, 5.0)
+
+	assert_eq([new_key != key, frames_after >= 5, room2_keys.get_key("e2e-user-1", 0) == new_key], [true, true, true])
+	_close(video)
+
+
+func test_encryption_turned_off_and_on_again_stays_on():
+	if _skip_if_unsupported():
+		return
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options("wrong key")), "Both rooms should connect")
+	var manager := _room.get_e2ee_manager()
+	manager.set_enabled(false)
+	manager.set_enabled(true)
+	# Room2 can only decode the video if it isn't encrypted.
+	var video := _publish_red_video()
+	var frames := await _count_red_frames(video, 1, 8.0)
+	# Once room2 has the key, data gets through too.
+	var received := []
+	_room2.data_received.connect(func(data, _participant, _kind, _topic): received.append(data.get_string_from_utf8()))
+	_room2.get_e2ee_manager().get_key_provider().set_shared_key(KEY.to_utf8_buffer(), 0)
+	_room.get_local_participant().publish_data("secret".to_utf8_buffer(), true)
+	await _poll_both(func(): return not received.is_empty(), 5.0)
+
+	assert_eq([manager.get_enabled(), video.subscribed, frames, received], [true, true, 0, ["secret"]])
+	_close(video)
+
+
+func test_data_sent_as_encryption_is_turned_back_on_is_delivered():
+	if _skip_if_unsupported():
+		return
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
+	var manager := _room.get_e2ee_manager()
+	manager.set_enabled(false)
+	await _poll_both(func(): return false, 2.0)
+	var received := []
+	_room2.data_received.connect(func(data, _participant, _kind, _topic): received.append(data.get_string_from_utf8()))
+
+	_room.get_local_participant().publish_data("secret".to_utf8_buffer(), true)
+	manager.set_enabled(true)
+	await _poll_both(func(): return not received.is_empty(), 5.0)
+
+	assert_eq(received, ["secret"])
+
+
+func test_correct_shared_key_is_used_after_a_wrong_one_exceeds_the_failure_tolerance():
+	await _assert_recovers_from_wrong_key(true)
+
+
+func test_correct_participant_key_is_used_after_a_wrong_one_exceeds_the_failure_tolerance():
+	await _assert_recovers_from_wrong_key(false)
+
+
+## Asserts that room2 decodes room1's video once it's given the right key, after failing to with a
+## wrong one.
+func _assert_recovers_from_wrong_key(shared: bool) -> void:
+	if _skip_if_unsupported():
+		return
+	var key := KEY.to_utf8_buffer()
+	var options := _intolerant_options(key if shared else PackedByteArray())
+	var room2_options := _intolerant_options("wrong key".to_utf8_buffer() if shared else PackedByteArray())
+	assert_true(await _connect_both_rooms(options, room2_options), "Both rooms should connect")
+	var room2_keys := _room2.get_e2ee_manager().get_key_provider()
+	if not shared:
+		_room.get_e2ee_manager().get_key_provider().set_key("e2e-user-1", key, 0)
+		room2_keys.set_key("e2e-user-1", "wrong key".to_utf8_buffer(), 0)
+	var video := _publish_red_video()
+	var frames_with_wrong_key := await _count_red_frames(video, 1, 5.0)
+
+	if shared:
+		room2_keys.set_shared_key(key, 0)
+	else:
+		room2_keys.set_key("e2e-user-1", key, 0)
+	var frames_with_right_key := await _count_red_frames(video, 5, 10.0)
+
+	assert_eq([video.subscribed, frames_with_wrong_key, frames_with_right_key >= 5], [true, 0, true])
+	_close(video)
+
+
+## Options that drop a key after one decryption failure, with a shared key unless it's empty.
+func _intolerant_options(shared_key: PackedByteArray) -> Dictionary:
+	var options := LiveKitE2eeOptions.new()
+	options.failure_tolerance = 0
+	options.ratchet_window_size = 0
+	if not shared_key.is_empty():
+		options.shared_key = shared_key
+	return {"e2ee": options}
+
+
+func _skip_if_unsupported() -> bool:
+	if _skip_if_no_server():
+		return true
+	if not OS.has_feature("web"):
+		# client-sdk-cpp v0.3.1 builds its E2EEManager from a room handle that isn't set yet.
+		pending("Native E2EE crashes on connect with client-sdk-cpp v0.3.1")
+		return true
+	return false
+
+
+func _e2ee_options(key: String) -> Dictionary:
+	var options := LiveKitE2eeOptions.new()
+	options.shared_key = key.to_utf8_buffer()
+	return {"e2ee": options}
+
+
+## Publishes red video from room1 and starts listening for it in room2. Returns the state that
+## _count_red_frames() updates.
+func _publish_red_video() -> Dictionary:
+	var source := LiveKitVideoSource.create(WIDTH, HEIGHT)
+	var image := Image.create_empty(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
+	image.fill(Color(1.0, 0.0, 0.0))
+	_room.get_local_participant().publish_track(LiveKitLocalVideoTrack.create("e2ee_video", source), {"source": LiveKitTrack.SOURCE_CAMERA})
+	var video := {"source": source, "image": image, "stream": null, "subscribed": false, "red_frames": 0}
+	_room2.track_subscribed.connect(func(remote_track, _publication, _participant):
+		if remote_track.get_kind() == LiveKitTrack.KIND_VIDEO:
+			video.subscribed = true
+			video.stream = LiveKitVideoStream.from_track(remote_track)
+			video.stream.frame_received.connect(func():
+				var texture: ImageTexture = video.stream.get_texture()
+				var received := texture.get_image() if texture else null
+				if received and received.get_width() > 0:
+					var center := received.get_pixel(received.get_width() / 2, received.get_height() / 2)
+					if center.r > 0.7 and center.g < 0.3 and center.b < 0.3:
+						video.red_frames += 1
+			)
+	)
+	return video
+
+
+## Keeps capturing video until room2 has received count more red frames, or timeout_sec has
+## passed, and returns how many it received.
+func _count_red_frames(video: Dictionary, count: int, timeout_sec: float) -> int:
+	var initial: int = video.red_frames
+	var start := Time.get_ticks_msec()
+	var last_capture := -1000
+	while Time.get_ticks_msec() - start < timeout_sec * 1000 and video.red_frames - initial < count:
+		if Time.get_ticks_msec() - last_capture >= 33:
+			video.source.capture_frame(video.image)
+			last_capture = Time.get_ticks_msec()
+		_room.poll_events()
+		_room2.poll_events()
+		await get_tree().process_frame
+	return video.red_frames - initial
+
+
+func _close(video: Dictionary) -> void:
+	if video.stream:
+		video.stream.close()
+	# The frame_received handler captures video, so this breaks their cycle.
+	video.stream = null

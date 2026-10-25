@@ -20,6 +20,7 @@ void LiveKitRoom::_bind_methods() {
     ClassDB::bind_method(D_METHOD("poll_events"), &LiveKitRoom::poll_events);
     ClassDB::bind_method(D_METHOD("get_local_participant"), &LiveKitRoom::get_local_participant);
     ClassDB::bind_method(D_METHOD("get_remote_participants"), &LiveKitRoom::get_remote_participants);
+    ClassDB::bind_method(D_METHOD("get_e2ee_manager"), &LiveKitRoom::get_e2ee_manager);
     ClassDB::bind_method(D_METHOD("get_sid"), &LiveKitRoom::get_sid);
     ClassDB::bind_method(D_METHOD("get_name"), &LiveKitRoom::get_name);
     ClassDB::bind_method(D_METHOD("get_metadata"), &LiveKitRoom::get_metadata);
@@ -105,6 +106,14 @@ void LiveKitRoom::_bind_methods() {
             PropertyInfo(Variant::INT, "kind"),
             PropertyInfo(Variant::STRING, "topic")));
 
+    // E2EE signals
+    ADD_SIGNAL(MethodInfo("e2ee_state_changed",
+            PropertyInfo(Variant::OBJECT, "participant", PROPERTY_HINT_RESOURCE_TYPE, "LiveKitParticipant"),
+            PropertyInfo(Variant::INT, "state")));
+    ADD_SIGNAL(MethodInfo("participant_encryption_status_changed",
+            PropertyInfo(Variant::OBJECT, "participant", PROPERTY_HINT_RESOURCE_TYPE, "LiveKitParticipant"),
+            PropertyInfo(Variant::BOOL, "is_encrypted")));
+
     BIND_ENUM_CONSTANT(STATE_DISCONNECTED);
     BIND_ENUM_CONSTANT(STATE_CONNECTED);
     BIND_ENUM_CONSTANT(STATE_RECONNECTING);
@@ -126,7 +135,14 @@ bool LiveKitRoom::connect_to_room(const String &url, const String &token, const 
     connection_generation_++;
     _reset_participants();
     connection_state_ = STATE_DISCONNECTED;
-    web_call("room_connect", Array::make(js_id_, url, token, options));
+    Dictionary web_options = options.duplicate();
+    // Objects don't survive the trip to JavaScript, so E2EE options go as a Dictionary.
+    web_options.erase("e2ee");
+    Ref<LiveKitE2eeOptions> e2ee = options.get("e2ee", Variant());
+    if (e2ee.is_valid()) {
+        web_options["e2ee"] = e2ee->to_web();
+    }
+    web_call("room_connect", Array::make(js_id_, url, token, web_options));
     return true; // "connection started" — result arrives via signals
 }
 
@@ -149,6 +165,7 @@ void LiveKitRoom::poll_events() {
 void LiveKitRoom::_reset_participants() {
     local_participant_.unref();
     remote_participants_.clear();
+    e2ee_manager_.unref();
 }
 
 // Returns the event's participant (the local participant, a known remote participant, or null),
@@ -197,6 +214,11 @@ void LiveKitRoom::_dispatch(const Dictionary &p_event) {
         Array remotes = p_event.get("remotes", Array());
         for (int i = 0; i < remotes.size(); i++) {
             _add_remote_participant(remotes[i]);
+        }
+        int e2ee_js_id = p_event.get("e2ee", 0);
+        if (e2ee_js_id) {
+            e2ee_manager_.instantiate();
+            e2ee_manager_->bind_web_e2ee(e2ee_js_id);
         }
         emit_signal("connected");
     } else if (type == "connection_failed") {
@@ -266,6 +288,16 @@ void LiveKitRoom::_dispatch(const Dictionary &p_event) {
         if (local_participant_.is_valid()) {
             local_participant_->emit_signal("rpc_error", p_event.get("method", String()), p_event.get("message", String()));
         }
+    } else if (type == "e2ee_state_changed") {
+        Ref<LiveKitParticipant> p = _participant(p_event);
+        if (p.is_valid()) {
+            emit_signal("e2ee_state_changed", p, int(p_event.get("state", 0)));
+        }
+    } else if (type == "participant_encryption_status_changed") {
+        Ref<LiveKitParticipant> p = _participant(p_event);
+        if (p.is_valid()) {
+            emit_signal("participant_encryption_status_changed", p, bool(p_event.get("encrypted", false)));
+        }
     } else if (type == "data_received") {
         PackedByteArray data = Marshalls::get_singleton()->base64_to_raw(p_event.get("data", String()));
         emit_signal("data_received", data, _participant(p_event), int(p_event.get("kind", 1)), p_event.get("topic", String()));
@@ -278,6 +310,10 @@ Ref<LiveKitLocalParticipant> LiveKitRoom::get_local_participant() const {
 
 Dictionary LiveKitRoom::get_remote_participants() const {
     return remote_participants_.duplicate();
+}
+
+Ref<LiveKitE2eeManager> LiveKitRoom::get_e2ee_manager() const {
+    return e2ee_manager_;
 }
 
 String LiveKitRoom::get_sid() const {

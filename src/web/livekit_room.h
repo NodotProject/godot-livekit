@@ -6,6 +6,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include "livekit_e2ee.h"
 #include "livekit_participant.h"
 
 namespace godot {
@@ -31,6 +32,7 @@ private:
     bool auto_poll_ = true;
     Ref<LiveKitLocalParticipant> local_participant_;
     Dictionary remote_participants_;
+    Ref<LiveKitE2eeManager> e2ee_manager_;
 
     void _dispatch(const Dictionary &p_event);
     Ref<LiveKitParticipant> _participant(const Dictionary &p_event, bool p_create_remote = false);
@@ -50,6 +52,7 @@ public:
 
     Ref<LiveKitLocalParticipant> get_local_participant() const;
     Dictionary get_remote_participants() const;
+    Ref<LiveKitE2eeManager> get_e2ee_manager() const;
 
     String get_sid() const;
     String get_name() const;

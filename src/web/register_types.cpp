@@ -1,5 +1,6 @@
 #include "livekit_audio_source.h"
 #include "livekit_audio_stream.h"
+#include "livekit_e2ee.h"
 #include "livekit_participant.h"
 #include "livekit_room.h"
 #include "livekit_track.h"
@@ -53,6 +54,12 @@ void initialize_livekit_module(ModuleInitializationLevel p_level) {
     ClassDB::register_class<LiveKitAudioStream>();
     ClassDB::register_class<LiveKitVideoSource>();
     ClassDB::register_class<LiveKitAudioSource>();
+
+    // E2EE
+    ClassDB::register_class<LiveKitE2eeOptions>();
+    ClassDB::register_class<LiveKitKeyProvider>();
+    ClassDB::register_class<LiveKitFrameCryptor>();
+    ClassDB::register_class<LiveKitE2eeManager>();
 }
 
 void uninitialize_livekit_module(ModuleInitializationLevel p_level) {

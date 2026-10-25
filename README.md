@@ -115,13 +115,14 @@ func _on_frame():
 
 ## Web
 
-Web exports use a separate build of the extension that implements the same classes on top of [livekit-client](https://github.com/livekit/client-sdk-js), which is embedded in it. Web support is in progress. So far it covers rooms, participants, track publications, data messages, RPC, track stats, audio (sources, local audio tracks and streams) and video (sources, local video tracks and streams). Classes that browsers can't support (`LiveKitAudioProcessingModule` and `LiveKitScreenCapture`) or that aren't available yet (E2EE) aren't registered on the web, so `ClassDB.class_exists()` reports them as missing.
+Web exports use a separate build of the extension that implements the same classes on top of [livekit-client](https://github.com/livekit/client-sdk-js), which is embedded in it. Web support is in progress. So far it covers rooms, participants, track publications, data messages, RPC, track stats, audio (sources, local audio tracks and streams), video (sources, local video tracks and streams) and end-to-end encryption. Classes that browsers can't support (`LiveKitAudioProcessingModule` and `LiveKitScreenCapture`) aren't registered on the web, so `ClassDB.class_exists()` reports them as missing.
 
 To export for the web:
 
 - Enable **Extensions Support** in the Web export preset, and leave **Thread Support** off. The web build is single-threaded, like Godot's default web templates.
 - Audio runs on the browser's `AudioContext`, which browsers only start after a user gesture (a click or key press). Audio sources are resampled to its rate, so they needn't use 10ms frames as they do natively.
 - Video sources apply `capture_frame()`'s `rotation` to the pixels, since browsers can't send it as metadata, and use the browser's timestamps. Received video is converted to RGBA asynchronously with `VideoFrame.copyTo()` where the browser supports it, so each frame reaches `frame_received` one poll after it arrives. Other browsers read frames through a canvas, which takes main-thread time at large resolutions.
+- End-to-end encryption runs in livekit-client's encryption worker, which is embedded in the extension. Keys are ratcheted asynchronously, so `ratchet_shared_key()` and `ratchet_key()` return an empty array, and the new key is available from `get_shared_key()` or `get_key()` once it's ready.
 - LiveKit events are delivered by the browser between frames, so wait for them by yielding (e.g. `await get_tree().process_frame`), not with blocking loops like `OS.delay_msec()`.
 
 ## Running Tests
