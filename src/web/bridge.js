@@ -447,7 +447,7 @@
         .connect(url, token, { autoSubscribe: options.auto_subscribe !== false })
         // Data is only encrypted once the worker has confirmed that encryption is enabled, so
         // the connection isn't ready until then.
-        .then(() => r.room === room && r.e2ee && whenEncrypting(r.e2ee))
+        .then(() => r.room === room && r.e2ee && whenEncryptionIs(r.e2ee, true))
         .then(() => {
           if (r.room !== room) {
             return;
@@ -642,10 +642,10 @@
   class KeyProvider extends LK.BaseKeyProvider {
     // Sets already-imported key material. Unlike BaseKeyProvider's own setter, a key only becomes
     // the one used to encrypt when makeCurrent is set, as natively, so that keys can be rotated by
-    // distributing the next one before switching to it. A remote participant's key can always be
-    // made the worker's current one, since that doesn't change which key encrypts; doing so clears
-    // the key's decryption failures, which the worker would otherwise keep dropping frames for.
-    setKeyMaterial(material, identity, keyIndex, makeCurrent, remote) {
+    // distributing the next one before switching to it. The worker only clears a key's decryption
+    // failures (which it otherwise keeps dropping frames for) when it's made the current one, so
+    // clearFailures does that without changing which key encrypts.
+    setKeyMaterial(material, identity, keyIndex, makeCurrent, clearFailures) {
       if (!this.recordKeyMaterial(material, identity, keyIndex)) {
         this.onSetEncryptionKey(material, identity, keyIndex);
         return;
@@ -653,7 +653,7 @@
       if (makeCurrent) {
         this.latestManuallySetKeyIndex = keyIndex;
       }
-      this.emit(LK.KeyProviderEvent.SetKey, { key: material, participantIdentity: identity, keyIndex }, makeCurrent || remote);
+      this.emit(LK.KeyProviderEvent.SetKey, { key: material, participantIdentity: identity, keyIndex }, makeCurrent || clearFailures);
     }
 
     // Records key material that livekit-client passes to the worker whenever it re-sends keys,
@@ -703,11 +703,14 @@
       // Raw keys by keyName(): as set through the API, and as passed to livekit-client so far.
       keys: new Map(),
       appliedKeys: new Map(),
-      // Whether the worker has confirmed that local encryption is enabled, and who's waiting for it.
+      // Whether the worker has confirmed that local encryption is enabled, who's waiting for it to
+      // change, and the changes requested through the API.
       encrypting: false,
       encryptingWaiters: [],
+      enableUpdates: Promise.resolve(),
       // The frame cryptor settings changed through the API.
       keyIndexes: new Map(),
+      appliedKeyIndexes: new Map(),
       cryptorsEnabled: new Map(),
       // Keys are imported asynchronously, but must reach livekit-client in the order they're set.
       keyUpdates: Promise.resolve(),
@@ -756,20 +759,40 @@
     // Recorded again, since a ratchet queued before this key was set may have replaced it since.
     e.keys.set(keyName(identity, keyIndex), key);
     e.appliedKeys.set(keyName(identity, keyIndex), key);
+    if (makeCurrent) {
+      e.appliedKeyIndexes.set(identity, keyIndex);
+    }
+    // Making a remote participant's key current doesn't change which key encrypts, and nor does
+    // making the current key current again.
     const room = findE2eeRoom(e);
     const remote = !!identity && !!room && identity !== room.localParticipant.identity;
-    e.keyProvider.setKeyMaterial(material, identity || undefined, keyIndex, makeCurrent, remote);
+    const current = keyIndex === (e.appliedKeyIndexes.get(identity) || 0);
+    e.keyProvider.setKeyMaterial(material, identity || undefined, keyIndex, makeCurrent, remote || current);
   }
 
   function setEncrypting(e, encrypting) {
     e.encrypting = encrypting;
-    if (encrypting) {
-      e.encryptingWaiters.splice(0).forEach((resolve) => resolve());
-    }
+    const waiters = e.encryptingWaiters;
+    e.encryptingWaiters = waiters.filter((waiter) => waiter.encrypting !== encrypting);
+    waiters.filter((waiter) => waiter.encrypting === encrypting).forEach((waiter) => waiter.resolve());
   }
 
-  function whenEncrypting(e) {
-    return e.encrypting ? Promise.resolve() : new Promise((resolve) => e.encryptingWaiters.push(resolve));
+  function whenEncryptionIs(e, encrypting) {
+    return e.encrypting === encrypting
+      ? Promise.resolve()
+      : new Promise((resolve) => e.encryptingWaiters.push({ encrypting, resolve }));
+  }
+
+  // Changes whether the local participant encrypts, once the worker has confirmed earlier changes.
+  // livekit-client compares against the last confirmed state, so it would skip a change made
+  // before then (and leave tracks published afterwards unencrypted).
+  function queueEnable(e, what, encrypting, update) {
+    e.enableUpdates = e.enableUpdates
+      .then(async () => {
+        await update();
+        await whenEncryptionIs(e, encrypting);
+      })
+      .catch(warn(what));
   }
 
   // Resolves once data sent from the room would use the latest key, if encryption is enabled.
@@ -780,15 +803,19 @@
     if (!e || !room) {
       return Promise.resolve();
     }
-    return e.keyUpdates.then(() => {
+    return Promise.all([e.keyUpdates, e.enableUpdates]).then(() => {
       if (!e.enabled) {
         return undefined;
+      }
+      // livekit-client only encrypts data while the local participant's frames are encrypted.
+      if (e.cryptorsEnabled.get(room.localParticipant.identity) === false) {
+        throw new Error("data can't be encrypted while the local participant's frame cryptor is disabled");
       }
       const owner = e.sharedKey ? '' : room.localParticipant.identity;
       if (!e.appliedKeys.has(keyName(owner, e.keyIndexes.get(owner)))) {
         throw new Error('no encryption key has been set for the local participant');
       }
-      return whenEncrypting(e);
+      return whenEncryptionIs(e, true);
     });
   }
 
@@ -834,8 +861,11 @@
 
     e2ee_set_enabled(e2eeId, enabled) {
       const e = e2eeOf(e2eeId);
+      const room = e2eeRoomOf(e);
       e.enabled = !!enabled;
-      e2eeRoomOf(e).setE2EEEnabled(e.enabled).catch(warn('set_enabled'));
+      // livekit-client switches the local participant's cryptor too.
+      e.cryptorsEnabled.delete(room.localParticipant.identity);
+      queueEnable(e, 'set_enabled', e.enabled, () => room.setE2EEEnabled(e.enabled));
     },
 
     e2ee_set_key(e2eeId, identity, b64, keyIndex) {
@@ -878,9 +908,15 @@
 
     e2ee_cryptor_set_enabled(e2eeId, identity, enabled) {
       const e = e2eeOf(e2eeId);
-      // Not part of livekit-client's public API, which has no per-participant switch.
-      e2eeRoomOf(e).e2eeManager.setParticipantCryptorEnabled(!!enabled, identity);
+      const room = e2eeRoomOf(e);
       e.cryptorsEnabled.set(identity, !!enabled);
+      // Not part of livekit-client's public API, which has no per-participant switch.
+      const update = () => room.e2eeManager.setParticipantCryptorEnabled(!!enabled, identity);
+      if (identity === room.localParticipant.identity) {
+        queueEnable(e, 'set_enabled', !!enabled, update);
+      } else {
+        update();
+      }
     },
 
     // livekit-client switches key index by setting that key again. With a shared key, that switches

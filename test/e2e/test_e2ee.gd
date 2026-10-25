@@ -156,25 +156,63 @@ func test_receiver_follows_a_ratcheted_key():
 	_close(video)
 
 
-func test_correct_key_is_used_after_a_wrong_one_exceeds_the_failure_tolerance():
+func test_encryption_turned_off_and_on_again_stays_on():
 	if _skip_if_unsupported():
 		return
-	var options := LiveKitE2eeOptions.new()
-	options.failure_tolerance = 0
-	options.ratchet_window_size = 0
-	assert_true(await _connect_both_rooms({"e2ee": options}, {"e2ee": options}), "Both rooms should connect")
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options("wrong key")), "Both rooms should connect")
+	var manager := _room.get_e2ee_manager()
+	manager.set_enabled(false)
+	manager.set_enabled(true)
+	# Room2 can only decode the video if it isn't encrypted.
+	var video := _publish_red_video()
+	var frames := await _count_red_frames(video, 1, 8.0)
+
+	assert_eq([manager.get_enabled(), video.subscribed, frames], [true, true, 0])
+	_close(video)
+
+
+func test_correct_shared_key_is_used_after_a_wrong_one_exceeds_the_failure_tolerance():
+	await _assert_recovers_from_wrong_key(true)
+
+
+func test_correct_participant_key_is_used_after_a_wrong_one_exceeds_the_failure_tolerance():
+	await _assert_recovers_from_wrong_key(false)
+
+
+## Asserts that room2 decodes room1's video once it's given the right key, after failing to with a
+## wrong one.
+func _assert_recovers_from_wrong_key(shared: bool) -> void:
+	if _skip_if_unsupported():
+		return
 	var key := KEY.to_utf8_buffer()
-	_room.get_e2ee_manager().get_key_provider().set_key("e2e-user-1", key, 0)
+	var options := _intolerant_options(key if shared else PackedByteArray())
+	var room2_options := _intolerant_options("wrong key".to_utf8_buffer() if shared else PackedByteArray())
+	assert_true(await _connect_both_rooms(options, room2_options), "Both rooms should connect")
 	var room2_keys := _room2.get_e2ee_manager().get_key_provider()
-	room2_keys.set_key("e2e-user-1", "wrong key".to_utf8_buffer(), 0)
+	if not shared:
+		_room.get_e2ee_manager().get_key_provider().set_key("e2e-user-1", key, 0)
+		room2_keys.set_key("e2e-user-1", "wrong key".to_utf8_buffer(), 0)
 	var video := _publish_red_video()
 	var frames_with_wrong_key := await _count_red_frames(video, 1, 5.0)
 
-	room2_keys.set_key("e2e-user-1", key, 0)
+	if shared:
+		room2_keys.set_shared_key(key, 0)
+	else:
+		room2_keys.set_key("e2e-user-1", key, 0)
 	var frames_with_right_key := await _count_red_frames(video, 5, 10.0)
 
 	assert_eq([video.subscribed, frames_with_wrong_key, frames_with_right_key >= 5], [true, 0, true])
 	_close(video)
+
+
+## Options that drop a key after one decryption failure, with a shared key unless it's empty.
+func _intolerant_options(shared_key: PackedByteArray) -> Dictionary:
+	var options := LiveKitE2eeOptions.new()
+	options.failure_tolerance = 0
+	options.ratchet_window_size = 0
+	if not shared_key.is_empty():
+		options.shared_key = shared_key
+	return {"e2ee": options}
 
 
 func _skip_if_unsupported() -> bool:
