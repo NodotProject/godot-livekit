@@ -66,24 +66,8 @@ Ref<ImageTexture> LiveKitVideoStream::get_texture() const {
 }
 
 bool LiveKitVideoStream::poll() {
-    int width = 0;
-    int height = 0;
-    if (!js_id_ || !web_video_stream_prepare(js_id_, &width, &height)) {
+    if (!web_video_stream_poll(js_id_, cached_image_, texture_, cached_pba_)) {
         return false;
-    }
-    cached_pba_.resize(int64_t(width) * height * 4);
-    web_video_stream_read(js_id_, cached_pba_.ptrw());
-    if (width == last_width_ && height == last_height_ && cached_image_.is_valid()) {
-        cached_image_->set_data(width, height, false, Image::FORMAT_RGBA8, cached_pba_);
-        texture_->update(cached_image_);
-    } else {
-        cached_image_ = Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, cached_pba_);
-        if (cached_image_.is_null()) {
-            return false;
-        }
-        texture_->set_image(cached_image_);
-        last_width_ = width;
-        last_height_ = height;
     }
     emit_signal("frame_received");
     return true;

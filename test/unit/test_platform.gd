@@ -34,12 +34,8 @@ func test_all_classes_registered():
 	]
 
 	if OS.has_feature("web"):
-		# Browsers don't expose these.
-		for cls in [
-			"LiveKitAudioProcessingModule",
-			"LiveKitScreenCapture",
-		]:
-			classes.erase(cls)
+		# Browsers apply their own audio processing to captured audio.
+		classes.erase("LiveKitAudioProcessingModule")
 
 	for cls in classes:
 		assert_true(ClassDB.class_exists(cls),

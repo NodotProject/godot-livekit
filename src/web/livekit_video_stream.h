@@ -21,8 +21,6 @@ private:
     Ref<ImageTexture> texture_;
     Ref<Image> cached_image_;
     PackedByteArray cached_pba_;
-    int last_width_ = 0;
-    int last_height_ = 0;
     bool auto_poll_ = true;
 
     static Ref<LiveKitVideoStream> _create(const Variant &p_js_id);

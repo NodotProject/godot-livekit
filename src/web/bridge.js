@@ -1578,7 +1578,7 @@
   // newest frame if it hasn't been yet.
   function videoStreamPrepare(id) {
     const st = videoStreams.get(id);
-    if (!st) {
+    if (!st || (st.capture && st.capture.paused)) {
       return null;
     }
     if (!st.ready) {
@@ -1701,6 +1701,13 @@
     }
     detachVideo(st);
     st.track = track;
+    // Through the SDK, so that it detaches the element when the track is unsubscribed. Otherwise a
+    // recycled receiver could show another track's video.
+    playVideo(st, (el) => track.attach(el));
+  }
+
+  // Plays video, which attach connects to an element, in a hidden element that polls read from.
+  function playVideo(st, attach) {
     const el = document.createElement('video');
     el.muted = true;
     el.playsInline = true;
@@ -1715,9 +1722,7 @@
       pointerEvents: 'none',
     });
     document.body.appendChild(el);
-    // Through the SDK, so that it detaches the element when the track is unsubscribed. Otherwise a
-    // recycled receiver could show another track's video.
-    track.attach(el);
+    attach(el);
     el.play().catch(() => {});
     st.element = el;
     st.fresh = false;
@@ -1737,7 +1742,11 @@
   function detachVideo(st) {
     const track = st.track;
     if (st.element) {
-      track.detach(st.element);
+      if (track) {
+        track.detach(st.element);
+      } else {
+        st.element.srcObject = null;
+      }
       st.element.remove();
     }
     st.track = st.element = st.ready = null;
@@ -1854,6 +1863,85 @@
         if (st.participant) {
           st.participant.off(LK.ParticipantEvent.TrackSubscribed, st.onSubscribed);
         }
+        videoStreams.delete(id);
+      }
+    },
+  });
+
+  // --- Screen capture ---
+  //
+  // Browsers ask the user what to share, so a capture can't target a monitor or window, and only
+  // starts once the user has picked one. Its frames are read like a remote video stream's.
+
+  function screenCaptureOf(id) {
+    const st = videoStreams.get(id);
+    if (!st || !st.capture) {
+      throw new Error('invalid screen capture');
+    }
+    return st;
+  }
+
+  function stopScreenCapture(st) {
+    const c = st.capture;
+    c.wanted = false;
+    if (c.stream) {
+      c.stream.getTracks().forEach((track) => track.stop());
+      c.stream = null;
+    }
+    detachVideo(st);
+  }
+
+  Object.assign(api, {
+    screen_capture_supported() {
+      return !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+    },
+
+    screen_capture_create() {
+      const [id, st] = newVideoStream();
+      st.capture = { stream: null, wanted: false, paused: false };
+      return id;
+    },
+
+    screen_capture_start(id) {
+      const st = screenCaptureOf(id);
+      const c = st.capture;
+      if (c.wanted) {
+        return;
+      }
+      c.wanted = true;
+      navigator.mediaDevices.getDisplayMedia({ video: true, audio: false }).then(
+        (stream) => {
+          // Stopped (or closed) while the user was choosing.
+          if (!c.wanted || st.closed) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+          c.stream = stream;
+          // The user can also stop sharing through the browser.
+          stream.getVideoTracks()[0].addEventListener('ended', () => c.stream === stream && stopScreenCapture(st));
+          playVideo(st, (el) => (el.srcObject = stream));
+        },
+        (e) => {
+          c.wanted = false;
+          // Most often, the user declined to share.
+          warn('starting screen capture')(e);
+        },
+      );
+    },
+
+    screen_capture_stop(id) {
+      stopScreenCapture(screenCaptureOf(id));
+    },
+
+    screen_capture_set_paused(id, paused) {
+      screenCaptureOf(id).capture.paused = !!paused;
+    },
+
+    screen_capture_close(id) {
+      const st = videoStreams.get(id);
+      if (st && st.capture) {
+        stopScreenCapture(st);
+        st.closed = true;
         videoStreams.delete(id);
       }
     },
