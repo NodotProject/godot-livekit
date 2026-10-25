@@ -97,23 +97,31 @@ func test_data_sent_right_after_switching_keys_uses_the_new_key():
 	_close(video)
 
 
-func test_ratchets_requested_together_each_advance_the_key():
+func test_key_changes_requested_together_each_take_effect():
 	if _skip_if_unsupported():
 		return
 	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
+	# Frame cryptors (which switch keys) only exist for tracks.
+	var video := _publish_red_video()
+	assert_true(await _count_red_frames(video, 1, 15.0) >= 1, "Room2 should receive video")
 	var key_provider := _room.get_e2ee_manager().get_key_provider()
 	var key := KEY.to_utf8_buffer()
 	key_provider.set_shared_key(key, 1)
 	key_provider.ratchet_shared_key(1)
 	key_provider.ratchet_shared_key(1)
-	# The same two ratchets, one at a time.
+	key_provider.set_shared_key(key, 3)
+	key_provider.ratchet_shared_key(3)
+	for cryptor in _room.get_e2ee_manager().get_frame_cryptors():
+		cryptor.set_key_index(3)
+	# The same ratchets, one at a time.
 	key_provider.set_shared_key(key, 2)
 	key_provider.ratchet_shared_key(2)
 	var once := await _await_key_change(key_provider, 2, key)
 	key_provider.ratchet_shared_key(2)
 	var twice := await _await_key_change(key_provider, 2, once)
 
-	assert_eq([twice.size(), key_provider.get_shared_key(1)], [32, twice])
+	assert_eq([twice.size(), key_provider.get_shared_key(1), key_provider.get_shared_key(3)], [32, twice, once])
+	_close(video)
 
 
 ## Waits for the shared key at key_index to stop being old_key, and returns it.
@@ -145,6 +153,27 @@ func test_receiver_follows_a_ratcheted_key():
 		[new_key.size(), new_key != KEY.to_utf8_buffer(), ratcheted.is_empty() or ratcheted == new_key, frames_after >= 5],
 		[32, true, true, true],
 	)
+	_close(video)
+
+
+func test_correct_key_is_used_after_a_wrong_one_exceeds_the_failure_tolerance():
+	if _skip_if_unsupported():
+		return
+	var options := LiveKitE2eeOptions.new()
+	options.failure_tolerance = 0
+	options.ratchet_window_size = 0
+	assert_true(await _connect_both_rooms({"e2ee": options}, {"e2ee": options}), "Both rooms should connect")
+	var key := KEY.to_utf8_buffer()
+	_room.get_e2ee_manager().get_key_provider().set_key("e2e-user-1", key, 0)
+	var room2_keys := _room2.get_e2ee_manager().get_key_provider()
+	room2_keys.set_key("e2e-user-1", "wrong key".to_utf8_buffer(), 0)
+	var video := _publish_red_video()
+	var frames_with_wrong_key := await _count_red_frames(video, 1, 5.0)
+
+	room2_keys.set_key("e2e-user-1", key, 0)
+	var frames_with_right_key := await _count_red_frames(video, 5, 10.0)
+
+	assert_eq([video.subscribed, frames_with_wrong_key, frames_with_right_key >= 5], [true, 0, true])
 	_close(video)
 
 

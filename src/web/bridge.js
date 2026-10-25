@@ -642,8 +642,10 @@
   class KeyProvider extends LK.BaseKeyProvider {
     // Sets already-imported key material. Unlike BaseKeyProvider's own setter, a key only becomes
     // the one used to encrypt when makeCurrent is set, as natively, so that keys can be rotated by
-    // distributing the next one before switching to it.
-    setKeyMaterial(material, identity, keyIndex, makeCurrent) {
+    // distributing the next one before switching to it. A remote participant's key can always be
+    // made the worker's current one, since that doesn't change which key encrypts; doing so clears
+    // the key's decryption failures, which the worker would otherwise keep dropping frames for.
+    setKeyMaterial(material, identity, keyIndex, makeCurrent, remote) {
       if (!this.recordKeyMaterial(material, identity, keyIndex)) {
         this.onSetEncryptionKey(material, identity, keyIndex);
         return;
@@ -651,7 +653,7 @@
       if (makeCurrent) {
         this.latestManuallySetKeyIndex = keyIndex;
       }
-      this.emit(LK.KeyProviderEvent.SetKey, { key: material, participantIdentity: identity, keyIndex }, makeCurrent);
+      this.emit(LK.KeyProviderEvent.SetKey, { key: material, participantIdentity: identity, keyIndex }, makeCurrent || remote);
     }
 
     // Records key material that livekit-client passes to the worker whenever it re-sends keys,
@@ -754,7 +756,9 @@
     // Recorded again, since a ratchet queued before this key was set may have replaced it since.
     e.keys.set(keyName(identity, keyIndex), key);
     e.appliedKeys.set(keyName(identity, keyIndex), key);
-    e.keyProvider.setKeyMaterial(material, identity || undefined, keyIndex, makeCurrent);
+    const room = findE2eeRoom(e);
+    const remote = !!identity && !!room && identity !== room.localParticipant.identity;
+    e.keyProvider.setKeyMaterial(material, identity || undefined, keyIndex, makeCurrent, remote);
   }
 
   function setEncrypting(e, encrypting) {
@@ -797,12 +801,20 @@
   }
 
   function e2eeRoomOf(e) {
+    const room = findE2eeRoom(e);
+    if (!room) {
+      throw new Error('encryption is no longer available (the connection has ended)');
+    }
+    return room;
+  }
+
+  function findE2eeRoom(e) {
     for (const r of rooms.values()) {
       if (r.e2ee === e && r.room) {
         return r.room;
       }
     }
-    throw new Error('encryption is no longer available (the connection has ended)');
+    return null;
   }
 
   // livekit-client applies keys either to everyone (with a shared key) or per participant.
@@ -876,11 +888,12 @@
     e2ee_cryptor_set_key_index(e2eeId, identity, keyIndex) {
       const e = e2eeOf(e2eeId);
       const owner = e.sharedKey ? '' : identity;
-      const key = e.keys.get(keyName(owner, keyIndex));
-      if (!key) {
+      const name = keyName(owner, keyIndex);
+      if (!e.keys.has(name)) {
         throw new Error(`no key has been set at index ${keyIndex}`);
       }
-      setKey(e, owner, key, keyIndex, true);
+      // The key is read once earlier updates are done, so that a pending ratchet isn't undone.
+      queueKeyUpdate(e, 'setting the key index', () => applyKey(e, owner, e.appliedKeys.get(name), keyIndex, true));
       e.keyIndexes.set(owner, keyIndex);
     },
   });
