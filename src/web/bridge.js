@@ -366,7 +366,8 @@
         e.keyProvider.recordKeyMaterial(result.cryptoKey, identity, keyIndex);
         e.keys.set(name, key);
         e.appliedKeys.set(name, key);
-        const p = identity && r.room ? r.room.getParticipantByIdentity(identity) : null;
+        // The room may have reconnected since.
+        const p = identity && r.e2ee === e && r.room ? r.room.getParticipantByIdentity(identity) : null;
         if (p) {
           push(r, { type: 'e2ee_state_changed', participant: participantRef(r.room, p), state: ENCRYPTION_STATE_KEY_RATCHETED });
         }
@@ -823,7 +824,7 @@
     if (!e || !room) {
       return Promise.resolve();
     }
-    return Promise.all([e.keyUpdates, e.enableUpdates]).then(() => {
+    return whenUpdatesDone(e).then(() => {
       if (!e.enabled) {
         return;
       }
@@ -844,7 +845,19 @@
     if (!e || !room) {
       return Promise.resolve();
     }
-    return e.enableUpdates.then(() => e.enabled && checkLocalEncryption(e, room));
+    return whenUpdatesDone(e).then(() => e.enabled && checkLocalEncryption(e, room));
+  }
+
+  // Resolves once the key and encryption changes requested so far are done, including any
+  // requested while waiting (in the same frame as a send, say).
+  async function whenUpdatesDone(e) {
+    let keyUpdates;
+    let enableUpdates;
+    do {
+      keyUpdates = e.keyUpdates;
+      enableUpdates = e.enableUpdates;
+      await Promise.all([keyUpdates, enableUpdates]);
+    } while (keyUpdates !== e.keyUpdates || enableUpdates !== e.enableUpdates);
   }
 
   // Throws unless the worker is encrypting the local participant's media (and so data, which

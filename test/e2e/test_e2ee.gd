@@ -225,6 +225,23 @@ func test_encryption_turned_off_and_on_again_stays_on():
 	_close(video)
 
 
+func test_data_sent_as_encryption_is_turned_back_on_is_delivered():
+	if _skip_if_unsupported():
+		return
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
+	var manager := _room.get_e2ee_manager()
+	manager.set_enabled(false)
+	await _poll_both(func(): return false, 2.0)
+	var received := []
+	_room2.data_received.connect(func(data, _participant, _kind, _topic): received.append(data.get_string_from_utf8()))
+
+	_room.get_local_participant().publish_data("secret".to_utf8_buffer(), true)
+	manager.set_enabled(true)
+	await _poll_both(func(): return not received.is_empty(), 5.0)
+
+	assert_eq(received, ["secret"])
+
+
 func test_correct_shared_key_is_used_after_a_wrong_one_exceeds_the_failure_tolerance():
 	await _assert_recovers_from_wrong_key(true)
 
