@@ -3,16 +3,13 @@
 #include "livekit_track.h"
 #include "livekit_track_publication.h"
 #include "web_bridge.h"
+#include "web_poll_list.h"
 
 #include <godot_cpp/classes/marshalls.hpp>
 
-#include <algorithm>
-#include <vector>
-
 using namespace godot;
 
-// Rooms with auto_poll enabled.
-static std::vector<LiveKitRoom *> polled_rooms;
+static WebPollList<LiveKitRoom> polled_rooms;
 
 void LiveKitRoom::_bind_methods() {
     ClassDB::bind_method(D_METHOD("connect_to_room", "url", "token", "options"), &LiveKitRoom::connect_to_room);
@@ -121,11 +118,11 @@ void LiveKitRoom::_bind_methods() {
 
 LiveKitRoom::LiveKitRoom() {
     js_id_ = web_call("room_create");
-    polled_rooms.push_back(this);
+    polled_rooms.add(this);
 }
 
 LiveKitRoom::~LiveKitRoom() {
-    polled_rooms.erase(std::remove(polled_rooms.begin(), polled_rooms.end(), this), polled_rooms.end());
+    polled_rooms.remove(this);
     if (js_id_) {
         web_call("room_destroy", Array::make(js_id_));
     }
@@ -338,9 +335,9 @@ void LiveKitRoom::set_auto_poll(bool enabled) {
     }
     auto_poll_ = enabled;
     if (enabled) {
-        polled_rooms.push_back(this);
+        polled_rooms.add(this);
     } else {
-        polled_rooms.erase(std::remove(polled_rooms.begin(), polled_rooms.end(), this), polled_rooms.end());
+        polled_rooms.remove(this);
     }
 }
 
@@ -349,13 +346,5 @@ bool LiveKitRoom::get_auto_poll() const {
 }
 
 void LiveKitRoom::poll_all() {
-    // Signal handlers may create or free rooms, so poll a snapshot and skip rooms freed since.
-    std::vector<LiveKitRoom *> rooms = polled_rooms;
-    for (LiveKitRoom *room : rooms) {
-        if (std::find(polled_rooms.begin(), polled_rooms.end(), room) != polled_rooms.end()) {
-            // Keeps the room alive even if a signal handler drops the last other reference.
-            Ref<LiveKitRoom> keep_alive(room);
-            room->poll_events();
-        }
-    }
+    polled_rooms.poll_all(&LiveKitRoom::poll_events);
 }

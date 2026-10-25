@@ -57,7 +57,7 @@ func _remove_participant(identity: String) -> int:
 		HashingContext.HASH_SHA256, _api_secret.to_utf8_buffer(), signing_input.to_utf8_buffer()
 	)
 	var http := HTTPRequest.new()
-	add_child_autofree(http)
+	add_child(http)
 	http.request(
 		_livekit_url.replace("ws://", "http://").replace("wss://", "https://") + "/twirp/livekit.RoomService/RemoveParticipant",
 		["Authorization: Bearer " + signing_input + "." + _base64url_encode(signature), "Content-Type: application/json"],
@@ -65,6 +65,8 @@ func _remove_participant(identity: String) -> int:
 		JSON.stringify({"room": _room_name, "identity": identity}),
 	)
 	var response: Array = await http.request_completed
+	# The test may end before request_completed's emission does, so the request can't be freed then.
+	http.queue_free()
 	return response[1]
 
 

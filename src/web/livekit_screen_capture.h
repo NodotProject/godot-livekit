@@ -31,9 +31,6 @@ private:
     bool paused_ = false;
     bool auto_poll_ = true;
 
-    void _register();
-    void _unregister();
-
 protected:
     static void _bind_methods();
 

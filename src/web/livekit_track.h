@@ -45,10 +45,15 @@ protected:
     int js_id_ = 0;
     // The last known state, used once livekit-client has released the track.
     mutable Dictionary info_;
+    // Whether this wrapper came from a local track's create(), rather than standing in for a
+    // publication's track. The browser keeps a local track running until it's released.
+    bool created_ = false;
 
     Dictionary _info() const;
 
 public:
+    ~LiveKitTrack();
+
     int get_js_id() const { return js_id_; }
 
     String get_sid() const;
@@ -88,8 +93,6 @@ protected:
     static void _bind_methods();
 
 public:
-    ~LiveKitLocalVideoTrack();
-
     static Ref<LiveKitLocalVideoTrack> create(const String &name, const Ref<LiveKitVideoSource> &source);
     void mute();
     void unmute();
@@ -97,8 +100,6 @@ public:
 private:
     // Kept alive for as long as the track, as in the native binding.
     Ref<LiveKitVideoSource> source_;
-    // Whether this wrapper came from create(), rather than standing in for a publication's track.
-    bool created_ = false;
 };
 
 class LiveKitRemoteAudioTrack : public LiveKitTrack {

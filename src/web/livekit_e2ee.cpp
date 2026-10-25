@@ -178,8 +178,10 @@ void LiveKitFrameCryptor::set_enabled(bool enabled) {
         UtilityFunctions::push_error("LiveKitFrameCryptor::set_enabled: not bound");
         return;
     }
-    web_call("e2ee_cryptor_set_enabled", Array::make(e2ee_js_id_, participant_identity_, enabled));
-    enabled_ = enabled;
+    // Unchanged if the call failed.
+    if (bool(web_call("e2ee_cryptor_set_enabled", Array::make(e2ee_js_id_, participant_identity_, enabled)))) {
+        enabled_ = enabled;
+    }
 }
 
 void LiveKitFrameCryptor::set_key_index(int key_index) {
@@ -187,8 +189,10 @@ void LiveKitFrameCryptor::set_key_index(int key_index) {
         UtilityFunctions::push_error("LiveKitFrameCryptor::set_key_index: not bound");
         return;
     }
-    web_call("e2ee_cryptor_set_key_index", Array::make(e2ee_js_id_, participant_identity_, key_index));
-    key_index_ = key_index;
+    // Unchanged if the call failed (e.g. because there's no key at that index).
+    if (bool(web_call("e2ee_cryptor_set_key_index", Array::make(e2ee_js_id_, participant_identity_, key_index)))) {
+        key_index_ = key_index;
+    }
 }
 
 // --- LiveKitE2eeManager ---
