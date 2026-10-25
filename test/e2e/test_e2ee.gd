@@ -74,6 +74,56 @@ func test_rotated_key_is_used_once_switched_to():
 	_close(video)
 
 
+func test_data_sent_right_after_switching_keys_uses_the_new_key():
+	if _skip_if_unsupported():
+		return
+	# Room2 can only decrypt the key room1 switches to.
+	var next_key := "next key".to_utf8_buffer()
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options("old key unknown to room2")), "Both rooms should connect")
+	_room2.get_e2ee_manager().get_key_provider().set_shared_key(next_key, 1)
+	var received := []
+	_room2.data_received.connect(func(data, _participant, _kind, _topic): received.append(data.get_string_from_utf8()))
+	# Frame cryptors (which switch keys) only exist for tracks.
+	var video := _publish_red_video()
+	await _count_red_frames(video, 1000, 1.0)
+
+	_room.get_e2ee_manager().get_key_provider().set_shared_key(next_key, 1)
+	for cryptor in _room.get_e2ee_manager().get_frame_cryptors():
+		cryptor.set_key_index(1)
+	_room.get_local_participant().publish_data("secret".to_utf8_buffer(), true)
+	await _poll_both(func(): return not received.is_empty(), 5.0)
+
+	assert_eq(received, ["secret"])
+	_close(video)
+
+
+func test_ratchets_requested_together_each_advance_the_key():
+	if _skip_if_unsupported():
+		return
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
+	var key_provider := _room.get_e2ee_manager().get_key_provider()
+	var key := KEY.to_utf8_buffer()
+	key_provider.set_shared_key(key, 1)
+	key_provider.ratchet_shared_key(1)
+	key_provider.ratchet_shared_key(1)
+	# The same two ratchets, one at a time.
+	key_provider.set_shared_key(key, 2)
+	key_provider.ratchet_shared_key(2)
+	var once := await _await_key_change(key_provider, 2, key)
+	key_provider.ratchet_shared_key(2)
+	var twice := await _await_key_change(key_provider, 2, once)
+
+	assert_eq([twice.size(), key_provider.get_shared_key(1)], [32, twice])
+
+
+## Waits for the shared key at key_index to stop being old_key, and returns it.
+func _await_key_change(key_provider: LiveKitKeyProvider, key_index: int, old_key: PackedByteArray) -> PackedByteArray:
+	var deadline := Time.get_ticks_msec() + 5000
+	while key_provider.get_shared_key(key_index) == old_key and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	return key_provider.get_shared_key(key_index)
+
+
 func test_receiver_follows_a_ratcheted_key():
 	if _skip_if_unsupported():
 		return

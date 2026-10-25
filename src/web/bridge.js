@@ -336,7 +336,11 @@
   function listenE2ee(r) {
     const room = r.room;
     const E = LK.RoomEvent;
+    const e = r.e2ee;
     room.on(E.ParticipantEncryptionStatusChanged, (encrypted, p) => {
+      if (p === room.localParticipant) {
+        setEncrypting(e, !!encrypted);
+      }
       if (p) {
         push(r, { type: 'participant_encryption_status_changed', participant: participantRef(room, p), encrypted: !!encrypted });
       }
@@ -347,9 +351,13 @@
         push(r, { type: 'e2ee_state_changed', participant: participantRef(room, p), state: ENCRYPTION_STATE[reason] });
       }
     });
-    r.e2ee.keyProvider.on(LK.KeyProviderEvent.KeyRatcheted, (result, identity, keyIndex) => {
+    e.keyProvider.on(LK.KeyProviderEvent.KeyRatcheted, (result, identity, keyIndex) => {
       // The worker reports ratchets after decryption failures, which a sender's ratchet causes.
-      r.e2ee.keys.set(keyName(identity, keyIndex), new Uint8Array(result.chainKey));
+      // livekit-client would replay the old key to the worker (when signaling reconnects, say).
+      e.keyProvider.recordKeyMaterial(result.cryptoKey, identity, keyIndex);
+      const key = new Uint8Array(result.chainKey);
+      e.keys.set(keyName(identity, keyIndex), key);
+      e.appliedKeys.set(keyName(identity, keyIndex), key);
       const p = identity && r.room ? r.room.getParticipantByIdentity(identity) : null;
       if (p) {
         push(r, { type: 'e2ee_state_changed', participant: participantRef(r.room, p), state: ENCRYPTION_STATE_KEY_RATCHETED });
@@ -400,6 +408,10 @@
       r.sid = '';
       r.names = new Map();
       const roomOptions = { dynacast: !!options.dynacast, adaptiveStream: false };
+      const fail = (e) => {
+        teardown(r);
+        r.events.push({ type: 'connection_failed', error: String((e && e.message) || e) });
+      };
       let room;
       try {
         r.e2ee = options.e2ee ? newE2ee(options.e2ee) : null;
@@ -409,8 +421,7 @@
         }
         room = new LK.Room(roomOptions);
       } catch (e) {
-        teardown(r);
-        r.events.push({ type: 'connection_failed', error: String((e && e.message) || e) });
+        fail(e);
         return;
       }
       r.room = room;
@@ -419,7 +430,7 @@
         listenE2ee(r);
         // As in the native SDK, encryption starts enabled. Enabling it before connecting means
         // that tracks are never published unencrypted.
-        room.setE2EEEnabled(true).catch(warn('enabling encryption'));
+        room.setE2EEEnabled(true).catch((e) => r.room === room && fail(e));
       }
       const timeoutSec = typeof options.connect_timeout === 'number' ? options.connect_timeout : 15.0;
       if (timeoutSec > 0) {
@@ -434,6 +445,9 @@
       }
       room
         .connect(url, token, { autoSubscribe: options.auto_subscribe !== false })
+        // Data is only encrypted once the worker has confirmed that encryption is enabled, so
+        // the connection isn't ready until then.
+        .then(() => r.room === room && r.e2ee && whenEncrypting(r.e2ee))
         .then(() => {
           if (r.room !== room) {
             return;
@@ -457,13 +471,7 @@
           r.events.push(...r.pending);
           r.pending = [];
         })
-        .catch((e) => {
-          if (r.room !== room) {
-            return;
-          }
-          teardown(r);
-          r.events.push({ type: 'connection_failed', error: String((e && e.message) || e) });
-        });
+        .catch((e) => r.room === room && fail(e));
     },
 
     room_disconnect(id) {
@@ -521,7 +529,10 @@
       if (topic) {
         options.topic = topic;
       }
-      localParticipantOf(id, participantId).publishData(fromBase64(b64), options).catch(warn('publish_data'));
+      const lp = localParticipantOf(id, participantId);
+      whenDataEncryptable(roomOf(id))
+        .then(() => lp.publishData(fromBase64(b64), options))
+        .catch(warn('publish_data'));
     },
 
     local_perform_rpc(id, participantId, destination, method, payload, timeout) {
@@ -530,7 +541,9 @@
       const room = r.room;
       // Results for an earlier connection are dropped, like that connection's other events.
       const report = (event) => r.room === room && push(r, Object.assign({ method }, event));
-      lp.performRpc({ destinationIdentity: destination, method, payload, responseTimeout: timeout * 1000 }).then(
+      whenDataEncryptable(r)
+        .then(() => lp.performRpc({ destinationIdentity: destination, method, payload, responseTimeout: timeout * 1000 }))
+        .then(
         (result) => report({ type: 'rpc_response_received', result: result || '' }),
         (e) => report({ type: 'rpc_error', message: (e && e.message) || String(e) }),
       );
@@ -631,17 +644,24 @@
     // the one used to encrypt when makeCurrent is set, as natively, so that keys can be rotated by
     // distributing the next one before switching to it.
     setKeyMaterial(material, identity, keyIndex, makeCurrent) {
-      if (!(this.keyInfoMap instanceof Map)) {
-        // BaseKeyProvider's internals have changed.
+      if (!this.recordKeyMaterial(material, identity, keyIndex)) {
         this.onSetEncryptionKey(material, identity, keyIndex);
         return;
       }
-      const keyInfo = { key: material, participantIdentity: identity, keyIndex };
-      this.keyInfoMap.set(`${identity || 'shared'}-${keyIndex}`, keyInfo);
       if (makeCurrent) {
         this.latestManuallySetKeyIndex = keyIndex;
       }
-      this.emit(LK.KeyProviderEvent.SetKey, keyInfo, makeCurrent);
+      this.emit(LK.KeyProviderEvent.SetKey, { key: material, participantIdentity: identity, keyIndex }, makeCurrent);
+    }
+
+    // Records key material that livekit-client passes to the worker whenever it re-sends keys,
+    // without sending it now. Returns false if BaseKeyProvider's internals have changed.
+    recordKeyMaterial(material, identity, keyIndex) {
+      if (!(this.keyInfoMap instanceof Map)) {
+        return false;
+      }
+      this.keyInfoMap.set(`${identity || 'shared'}-${keyIndex}`, { key: material, participantIdentity: identity, keyIndex });
+      return true;
     }
   }
 
@@ -678,8 +698,13 @@
       sharedKey,
       salt,
       enabled: true,
-      // Raw keys by keyName(), and the frame cryptor settings changed through the API.
+      // Raw keys by keyName(): as set through the API, and as passed to livekit-client so far.
       keys: new Map(),
+      appliedKeys: new Map(),
+      // Whether the worker has confirmed that local encryption is enabled, and who's waiting for it.
+      encrypting: false,
+      encryptingWaiters: [],
+      // The frame cryptor settings changed through the API.
       keyIndexes: new Map(),
       cryptorsEnabled: new Map(),
       // Keys are imported asynchronously, but must reach livekit-client in the order they're set.
@@ -704,11 +729,16 @@
 
   // Replaces a key with its ratchet, once the earlier key updates are done.
   function ratchetKey(e, identity, keyIndex) {
-    const key = e.keys.get(keyName(identity, keyIndex));
-    if (!key) {
+    const name = keyName(identity, keyIndex);
+    if (!e.keys.has(name)) {
       return;
     }
     queueKeyUpdate(e, 'ratcheting an encryption key', async () => {
+      // Read now rather than when queued, so that ratchets queued together each advance the key.
+      const key = e.appliedKeys.get(name);
+      if (!key) {
+        return;
+      }
       const material = await crypto.subtle.importKey('raw', key, 'PBKDF2', false, ['deriveBits']);
       const params = { name: 'PBKDF2', salt: new TextEncoder().encode(e.salt), hash: 'SHA-256', iterations: RATCHET_ITERATIONS };
       await applyKey(e, identity, new Uint8Array(await crypto.subtle.deriveBits(params, material, 256)), keyIndex, false);
@@ -723,7 +753,39 @@
     const material = await crypto.subtle.importKey('raw', key, 'PBKDF2', false, ['deriveBits', 'deriveKey']);
     // Recorded again, since a ratchet queued before this key was set may have replaced it since.
     e.keys.set(keyName(identity, keyIndex), key);
+    e.appliedKeys.set(keyName(identity, keyIndex), key);
     e.keyProvider.setKeyMaterial(material, identity || undefined, keyIndex, makeCurrent);
+  }
+
+  function setEncrypting(e, encrypting) {
+    e.encrypting = encrypting;
+    if (encrypting) {
+      e.encryptingWaiters.splice(0).forEach((resolve) => resolve());
+    }
+  }
+
+  function whenEncrypting(e) {
+    return e.encrypting ? Promise.resolve() : new Promise((resolve) => e.encryptingWaiters.push(resolve));
+  }
+
+  // Resolves once data sent from the room would use the latest key, if encryption is enabled.
+  // livekit-client doesn't wait, and its worker never replies to a send without a key.
+  function whenDataEncryptable(r) {
+    const e = r.e2ee;
+    const room = r.room;
+    if (!e || !room) {
+      return Promise.resolve();
+    }
+    return e.keyUpdates.then(() => {
+      if (!e.enabled) {
+        return undefined;
+      }
+      const owner = e.sharedKey ? '' : room.localParticipant.identity;
+      if (!e.appliedKeys.has(keyName(owner, e.keyIndexes.get(owner)))) {
+        throw new Error('no encryption key has been set for the local participant');
+      }
+      return whenEncrypting(e);
+    });
   }
 
   function e2eeOf(e2eeId) {
