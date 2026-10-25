@@ -768,7 +768,9 @@
     const room = findE2eeRoom(e);
     const remote = !!identity && !!room && identity !== room.localParticipant.identity;
     const current = keyIndex === (e.appliedKeyIndexes.get(identity) || 0);
-    e.keyProvider.setKeyMaterial(material, identity || undefined, keyIndex, makeCurrent, remote || current);
+    // livekit-client replays the latest selected index for every key on reconnect, so a remote
+    // selection must not become it, or the local participant would switch keys too.
+    e.keyProvider.setKeyMaterial(material, identity || undefined, keyIndex, makeCurrent && !remote, remote || current);
   }
 
   function setEncrypting(e, encrypting) {
@@ -806,24 +808,36 @@
     }
     return Promise.all([e.keyUpdates, e.enableUpdates]).then(() => {
       if (!e.enabled) {
-        return undefined;
+        return;
       }
-      // livekit-client only encrypts data while the local participant's frames are encrypted.
-      if (e.cryptorsEnabled.get(room.localParticipant.identity) === false) {
-        throw new Error("data can't be encrypted while the local participant's frame cryptor is disabled");
-      }
+      checkLocalEncryption(e, room);
       const owner = e.sharedKey ? '' : room.localParticipant.identity;
       if (!e.appliedKeys.has(keyName(owner, e.keyIndexes.get(owner)))) {
         throw new Error('no encryption key has been set for the local participant');
       }
-      return whenEncryptionIs(e, true);
     });
   }
 
   // Resolves once requested changes to whether the local participant encrypts are done, so that
   // tracks aren't published with the previous setting.
   function whenEncryptionSettled(r) {
-    return r.e2ee ? r.e2ee.enableUpdates : Promise.resolve();
+    const e = r.e2ee;
+    const room = r.room;
+    if (!e || !room) {
+      return Promise.resolve();
+    }
+    return e.enableUpdates.then(() => e.enabled && checkLocalEncryption(e, room));
+  }
+
+  // Throws unless the worker is encrypting the local participant's media (and so data, which
+  // livekit-client only encrypts then), as requested.
+  function checkLocalEncryption(e, room) {
+    if (e.cryptorsEnabled.get(room.localParticipant.identity) === false) {
+      throw new Error("the local participant's frame cryptor is disabled, so nothing it sends can be encrypted");
+    }
+    if (!e.encrypting) {
+      throw new Error('encryption failed to start (set_enabled(true) retries)');
+    }
   }
 
   function e2eeOf(e2eeId) {
