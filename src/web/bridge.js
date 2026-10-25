@@ -259,6 +259,7 @@
     room.on(E.Disconnected, () => {
       r.state = STATE_DISCONNECTED;
       push(r, { type: 'disconnected' });
+      endTrackUse(r).forEach(stopIfReleased);
     });
     // livekit-client reports a signaling-only resume separately from a full reconnect, and a resume
     // can escalate into one. Native reports both as a single reconnect.
@@ -398,13 +399,19 @@
   // Disconnects the room without reporting its events. Its tracks stay usable, as natively, and
   // are stopped once nothing uses them.
   function closeRoom(r) {
-    const tracks = r.tracks;
-    r.tracks = new Set();
+    const tracks = endTrackUse(r);
     r.room.removeAllListeners();
     r.room
       .disconnect(false)
       .catch(() => {})
       .finally(() => tracks.forEach(stopIfReleased));
+  }
+
+  // Returns the tracks published through the connection, which no longer uses them.
+  function endTrackUse(r) {
+    const tracks = r.tracks;
+    r.tracks = new Set();
+    return tracks;
   }
 
   const api = {
@@ -417,7 +424,7 @@
         pending: [],
         connected: false,
         names: new Map(),
-        // Local tracks published (or being published) through the API. livekit-client also
+        // Local tracks published through the API and not unpublished since. livekit-client also
         // unpublishes tracks itself, to republish them, so its publications can't tell.
         tracks: new Set(),
       });
@@ -1157,7 +1164,8 @@
   let workletsReady = null;
   const sources = new Map();
   const streams = new Map();
-  // Placeholder publications are held until livekit-client finishes publishing.
+  // Placeholder publications are held until livekit-client finishes publishing, which keeps their
+  // tracks in use until then.
   const pendingPublications = new Set();
   // Local tracks whose creating wrapper is gone.
   const releasedTracks = new WeakSet();
@@ -1357,8 +1365,13 @@
   }
 
   function trackInUse(track) {
-    const streaming = (all) => [...all.values()].some((st) => st.track === track);
-    return [...rooms.values()].some((r) => r.tracks.has(track)) || streaming(streams) || streaming(videoStreams);
+    const uses = (items) => [...items].some((item) => item.track === track);
+    return (
+      [...rooms.values()].some((r) => r.tracks.has(track)) ||
+      uses(pendingPublications) ||
+      uses(streams.values()) ||
+      uses(videoStreams.values())
+    );
   }
 
   function newStream() {
@@ -1521,27 +1534,24 @@
       pendingPublications.add(placeholder);
       const pubId = idOf(placeholder);
       const r = roomOf(id);
-      // This connection's, even if it has ended by the time publishing fails.
+      // This connection's, even if it has ended by the time publishing finishes.
       const tracks = r.tracks;
-      tracks.add(track);
       whenEncryptionSettled(r)
         .then(() => lp.publishTrack(track, publishOptions))
-        .then(
-          (pub) => {
-            promote(pubId, placeholder, pub);
-            const source = videoCaptureTracks.get(track.mediaStreamTrack);
-            if (source) {
-              resendVideoFrames(source, track.mediaStreamTrack);
-            }
-          },
-          (e) => {
-            tracks.delete(track);
-            stopIfReleased(track);
-            throw e;
-          },
-        )
+        .then((pub) => {
+          tracks.add(track);
+          promote(pubId, placeholder, pub);
+          const source = videoCaptureTracks.get(track.mediaStreamTrack);
+          if (source) {
+            resendVideoFrames(source, track.mediaStreamTrack);
+          }
+        })
         .catch(warn('publish_track'))
-        .finally(() => pendingPublications.delete(placeholder));
+        .finally(() => {
+          pendingPublications.delete(placeholder);
+          // In case publishing failed, or the connection has ended.
+          stopIfReleased(track);
+        });
       return publicationInfo(placeholder);
     },
 
