@@ -353,15 +353,24 @@
     });
     e.keyProvider.on(LK.KeyProviderEvent.KeyRatcheted, (result, identity, keyIndex) => {
       // The worker reports ratchets after decryption failures, which a sender's ratchet causes.
-      // livekit-client would replay the old key to the worker (when signaling reconnects, say).
-      e.keyProvider.recordKeyMaterial(result.cryptoKey, identity, keyIndex);
+      // A report can arrive after the key was replaced, so it only counts if it's the ratchet of
+      // the key as of the earlier updates.
+      const name = keyName(identity, keyIndex);
       const key = new Uint8Array(result.chainKey);
-      e.keys.set(keyName(identity, keyIndex), key);
-      e.appliedKeys.set(keyName(identity, keyIndex), key);
-      const p = identity && r.room ? r.room.getParticipantByIdentity(identity) : null;
-      if (p) {
-        push(r, { type: 'e2ee_state_changed', participant: participantRef(r.room, p), state: ENCRYPTION_STATE_KEY_RATCHETED });
-      }
+      queueKeyUpdate(e, 'recording a ratcheted key', async () => {
+        const previous = e.appliedKeys.get(name);
+        if (!previous || !sameBytes(await ratchetBytes(e, previous), key)) {
+          return;
+        }
+        // livekit-client would replay the old key to the worker (when signaling reconnects, say).
+        e.keyProvider.recordKeyMaterial(result.cryptoKey, identity, keyIndex);
+        e.keys.set(name, key);
+        e.appliedKeys.set(name, key);
+        const p = identity && r.room ? r.room.getParticipantByIdentity(identity) : null;
+        if (p) {
+          push(r, { type: 'e2ee_state_changed', participant: participantRef(r.room, p), state: ENCRYPTION_STATE_KEY_RATCHETED });
+        }
+      });
     });
   }
 
@@ -745,10 +754,18 @@
       if (!key) {
         return;
       }
-      const material = await crypto.subtle.importKey('raw', key, 'PBKDF2', false, ['deriveBits']);
-      const params = { name: 'PBKDF2', salt: new TextEncoder().encode(e.salt), hash: 'SHA-256', iterations: RATCHET_ITERATIONS };
-      await applyKey(e, identity, new Uint8Array(await crypto.subtle.deriveBits(params, material, 256)), keyIndex, false);
+      await applyKey(e, identity, await ratchetBytes(e, key), keyIndex, false);
     });
+  }
+
+  async function ratchetBytes(e, key) {
+    const material = await crypto.subtle.importKey('raw', key, 'PBKDF2', false, ['deriveBits']);
+    const params = { name: 'PBKDF2', salt: new TextEncoder().encode(e.salt), hash: 'SHA-256', iterations: RATCHET_ITERATIONS };
+    return new Uint8Array(await crypto.subtle.deriveBits(params, material, 256));
+  }
+
+  function sameBytes(a, b) {
+    return a.length === b.length && a.every((byte, i) => byte === b[i]);
   }
 
   function queueKeyUpdate(e, what, update) {
@@ -811,8 +828,9 @@
         return;
       }
       checkLocalEncryption(e, room);
+      // The index the worker encrypts with, which a pending switch may not have changed yet.
       const owner = e.sharedKey ? '' : room.localParticipant.identity;
-      if (!e.appliedKeys.has(keyName(owner, e.keyIndexes.get(owner)))) {
+      if (!e.appliedKeys.has(keyName(owner, e.appliedKeyIndexes.get(owner)))) {
         throw new Error('no encryption key has been set for the local participant');
       }
     });

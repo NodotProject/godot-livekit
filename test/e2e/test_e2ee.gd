@@ -97,6 +97,28 @@ func test_data_sent_right_after_switching_keys_uses_the_new_key():
 	_close(video)
 
 
+func test_data_sent_just_before_switching_keys_is_delivered():
+	if _skip_if_unsupported():
+		return
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
+	var next_key := "next key".to_utf8_buffer()
+	_room2.get_e2ee_manager().get_key_provider().set_shared_key(next_key, 1)
+	var received := []
+	_room2.data_received.connect(func(data, _participant, _kind, _topic): received.append(data.get_string_from_utf8()))
+	# Frame cryptors (which switch keys) only exist for tracks.
+	var video := _publish_red_video()
+	assert_true(await _count_red_frames(video, 1, 15.0) >= 1, "Room2 should receive video")
+
+	_room.get_local_participant().publish_data("secret".to_utf8_buffer(), true)
+	_room.get_e2ee_manager().get_key_provider().set_shared_key(next_key, 1)
+	for cryptor in _room.get_e2ee_manager().get_frame_cryptors():
+		cryptor.set_key_index(1)
+	await _poll_both(func(): return not received.is_empty(), 5.0)
+
+	assert_eq(received, ["secret"])
+	_close(video)
+
+
 func test_key_changes_requested_together_each_take_effect():
 	if _skip_if_unsupported():
 		return
@@ -153,6 +175,32 @@ func test_receiver_follows_a_ratcheted_key():
 		[new_key.size(), new_key != KEY.to_utf8_buffer(), ratcheted.is_empty() or ratcheted == new_key, frames_after >= 5],
 		[32, true, true, true],
 	)
+	_close(video)
+
+
+func test_receiver_records_a_participant_key_it_ratcheted():
+	if _skip_if_unsupported():
+		return
+	var no_shared_key := {"e2ee": LiveKitE2eeOptions.new()}
+	assert_true(await _connect_both_rooms(no_shared_key, {"e2ee": LiveKitE2eeOptions.new()}), "Both rooms should connect")
+	var key := KEY.to_utf8_buffer()
+	var room1_keys := _room.get_e2ee_manager().get_key_provider()
+	var room2_keys := _room2.get_e2ee_manager().get_key_provider()
+	room1_keys.set_key("e2e-user-1", key, 0)
+	room2_keys.set_key("e2e-user-1", key, 0)
+	var video := _publish_red_video()
+	assert_true(await _count_red_frames(video, 5, 15.0) >= 5, "Room2 should decode the first key's frames")
+
+	room1_keys.ratchet_key("e2e-user-1", 0)
+	var deadline := Time.get_ticks_msec() + 5000
+	while room1_keys.get_key("e2e-user-1", 0) == key and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	var new_key := room1_keys.get_key("e2e-user-1", 0)
+	# Room2 ratchets once frames stop decrypting, and reports the new key a little later.
+	var frames_after := await _count_red_frames(video, 5, 10.0)
+	await _poll_both(func(): return room2_keys.get_key("e2e-user-1", 0) == new_key, 5.0)
+
+	assert_eq([new_key != key, frames_after >= 5, room2_keys.get_key("e2e-user-1", 0) == new_key], [true, true, true])
 	_close(video)
 
 
