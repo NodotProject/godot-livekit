@@ -18,6 +18,12 @@
   const STATE_DISCONNECTED = 0;
   const STATE_CONNECTED = 1;
   const STATE_RECONNECTING = 2;
+  const ENCRYPTION_NONE = 0;
+  const ENCRYPTION_CUSTOM = 2;
+  // Native EncryptionState values, by the CryptorErrorReason name that the E2EE worker prefixes
+  // its error messages with (only the message survives being posted from the worker).
+  const ENCRYPTION_STATE = { InvalidKey: 3, MissingKey: 4, InternalError: 6 };
+  const ENCRYPTION_STATE_KEY_RATCHETED = 5;
 
   let nextId = 1;
   const rooms = new Map();
@@ -326,8 +332,39 @@
     );
   }
 
+  // Reports the E2EE events that livekit-client has equivalents for.
+  function listenE2ee(r) {
+    const room = r.room;
+    const E = LK.RoomEvent;
+    room.on(E.ParticipantEncryptionStatusChanged, (encrypted, p) => {
+      if (p) {
+        push(r, { type: 'participant_encryption_status_changed', participant: participantRef(room, p), encrypted: !!encrypted });
+      }
+    });
+    room.on(E.EncryptionError, (error, p) => {
+      const reason = String((error && error.message) || '').split(':')[0];
+      if (p && reason in ENCRYPTION_STATE) {
+        push(r, { type: 'e2ee_state_changed', participant: participantRef(room, p), state: ENCRYPTION_STATE[reason] });
+      }
+    });
+    r.e2ee.keyProvider.on(LK.KeyProviderEvent.KeyRatcheted, (result, identity, keyIndex) => {
+      // The worker reports ratchets after decryption failures, which a sender's ratchet causes.
+      r.e2ee.keys.set(keyName(identity, keyIndex), new Uint8Array(result.chainKey));
+      const p = identity && r.room ? r.room.getParticipantByIdentity(identity) : null;
+      if (p) {
+        push(r, { type: 'e2ee_state_changed', participant: participantRef(r.room, p), state: ENCRYPTION_STATE_KEY_RATCHETED });
+      }
+    });
+  }
+
   function teardown(r) {
     clearTimeout(r.timeout);
+    if (r.e2ee) {
+      e2ees.delete(r.e2ee.id);
+      // livekit-client leaves the worker to its creator.
+      r.e2ee.worker.terminate();
+      r.e2ee = null;
+    }
     if (r.room) {
       // Client-initiated disconnects aren't reported, matching the native binding.
       r.room.removeAllListeners();
@@ -362,9 +399,28 @@
       r.metadata = '';
       r.sid = '';
       r.names = new Map();
-      const room = new LK.Room({ dynacast: !!options.dynacast, adaptiveStream: false });
+      const roomOptions = { dynacast: !!options.dynacast, adaptiveStream: false };
+      let room;
+      try {
+        r.e2ee = options.e2ee ? newE2ee(options.e2ee) : null;
+        if (r.e2ee) {
+          // Unlike `e2ee`, `encryption` also encrypts data packets, as the native SDK does.
+          roomOptions.encryption = { keyProvider: r.e2ee.keyProvider, worker: r.e2ee.worker };
+        }
+        room = new LK.Room(roomOptions);
+      } catch (e) {
+        teardown(r);
+        r.events.push({ type: 'connection_failed', error: String((e && e.message) || e) });
+        return;
+      }
       r.room = room;
       listen(r);
+      if (r.e2ee) {
+        listenE2ee(r);
+        // As in the native SDK, encryption starts enabled. Enabling it before connecting means
+        // that tracks are never published unencrypted.
+        room.setE2EEEnabled(true).catch(warn('enabling encryption'));
+      }
       const timeoutSec = typeof options.connect_timeout === 'number' ? options.connect_timeout : 15.0;
       if (timeoutSec > 0) {
         r.timeout = setTimeout(() => {
@@ -394,6 +450,7 @@
           // 'connected' comes first, as in the native binding.
           r.events.push({
             type: 'connected',
+            e2ee: r.e2ee ? r.e2ee.id : 0,
             local: participantRef(room, room.localParticipant),
             remotes: Array.from(room.remoteParticipants.values()).map((p) => participantRef(room, p)),
           });
@@ -553,6 +610,218 @@
       return track ? trackInfo(track) : null;
     },
   };
+
+
+  // --- End-to-end encryption ---
+  //
+  // livekit-client encrypts media in a worker, which an export has no file for, so the build
+  // embeds its source. Keys are kept here too, since livekit-client can't export them.
+
+  const E2EE_WORKER = window.GodotLiveKitE2eeWorker;
+  delete window.GodotLiveKitE2eeWorker;
+  // As in the native SDK (and livekit-client's worker), the ratchet is PBKDF2 over the key.
+  const RATCHET_ITERATIONS = 100000;
+
+  // Connections' encryption state, by id, so that objects from an earlier connection stop working.
+  const e2ees = new Map();
+  let e2eeWorkerUrl = null;
+
+  class KeyProvider extends LK.BaseKeyProvider {
+    // Sets already-imported key material. Unlike BaseKeyProvider's own setter, a key only becomes
+    // the one used to encrypt when makeCurrent is set, as natively, so that keys can be rotated by
+    // distributing the next one before switching to it.
+    setKeyMaterial(material, identity, keyIndex, makeCurrent) {
+      if (!(this.keyInfoMap instanceof Map)) {
+        // BaseKeyProvider's internals have changed.
+        this.onSetEncryptionKey(material, identity, keyIndex);
+        return;
+      }
+      const keyInfo = { key: material, participantIdentity: identity, keyIndex };
+      this.keyInfoMap.set(`${identity || 'shared'}-${keyIndex}`, keyInfo);
+      if (makeCurrent) {
+        this.latestManuallySetKeyIndex = keyIndex;
+      }
+      this.emit(LK.KeyProviderEvent.SetKey, keyInfo, makeCurrent);
+    }
+  }
+
+  function newE2ee(options) {
+    if (options.encryption_type === ENCRYPTION_NONE) {
+      return null;
+    }
+    if (options.encryption_type === ENCRYPTION_CUSTOM) {
+      throw new Error("custom encryption isn't supported on the web");
+    }
+    if (!LK.isE2EESupported()) {
+      throw new Error("this browser doesn't support end-to-end encryption");
+    }
+    // livekit-client takes the salt as a string that it encodes as UTF-8.
+    let salt;
+    try {
+      salt = new TextDecoder('utf-8', { fatal: true }).decode(fromBase64(options.ratchet_salt));
+    } catch (e) {
+      throw new Error('ratchet_salt must be valid UTF-8 on the web');
+    }
+    const sharedKey = typeof options.shared_key === 'string';
+    if (!e2eeWorkerUrl) {
+      e2eeWorkerUrl = URL.createObjectURL(new Blob([E2EE_WORKER], { type: 'application/javascript' }));
+    }
+    const e = {
+      id: nextId++,
+      keyProvider: new KeyProvider({
+        sharedKey,
+        ratchetSalt: salt,
+        ratchetWindowSize: options.ratchet_window_size,
+        failureTolerance: options.failure_tolerance,
+      }),
+      worker: new Worker(e2eeWorkerUrl),
+      sharedKey,
+      salt,
+      enabled: true,
+      // Raw keys by keyName(), and the frame cryptor settings changed through the API.
+      keys: new Map(),
+      keyIndexes: new Map(),
+      cryptorsEnabled: new Map(),
+      // Keys are imported asynchronously, but must reach livekit-client in the order they're set.
+      keyUpdates: Promise.resolve(),
+    };
+    e2ees.set(e.id, e);
+    if (sharedKey) {
+      setKey(e, '', fromBase64(options.shared_key), 0);
+    }
+    return e;
+  }
+
+  function keyName(identity, keyIndex) {
+    return `${identity || ''}/${keyIndex || 0}`;
+  }
+
+  // Records a raw key and passes it to livekit-client. An empty identity means the shared key.
+  function setKey(e, identity, key, keyIndex, makeCurrent = false) {
+    e.keys.set(keyName(identity, keyIndex), key);
+    queueKeyUpdate(e, 'setting an encryption key', () => applyKey(e, identity, key, keyIndex, makeCurrent));
+  }
+
+  // Replaces a key with its ratchet, once the earlier key updates are done.
+  function ratchetKey(e, identity, keyIndex) {
+    const key = e.keys.get(keyName(identity, keyIndex));
+    if (!key) {
+      return;
+    }
+    queueKeyUpdate(e, 'ratcheting an encryption key', async () => {
+      const material = await crypto.subtle.importKey('raw', key, 'PBKDF2', false, ['deriveBits']);
+      const params = { name: 'PBKDF2', salt: new TextEncoder().encode(e.salt), hash: 'SHA-256', iterations: RATCHET_ITERATIONS };
+      await applyKey(e, identity, new Uint8Array(await crypto.subtle.deriveBits(params, material, 256)), keyIndex, false);
+    });
+  }
+
+  function queueKeyUpdate(e, what, update) {
+    e.keyUpdates = e.keyUpdates.then(update).catch(warn(what));
+  }
+
+  async function applyKey(e, identity, key, keyIndex, makeCurrent) {
+    const material = await crypto.subtle.importKey('raw', key, 'PBKDF2', false, ['deriveBits', 'deriveKey']);
+    // Recorded again, since a ratchet queued before this key was set may have replaced it since.
+    e.keys.set(keyName(identity, keyIndex), key);
+    e.keyProvider.setKeyMaterial(material, identity || undefined, keyIndex, makeCurrent);
+  }
+
+  function e2eeOf(e2eeId) {
+    const e = e2ees.get(e2eeId);
+    if (!e) {
+      throw new Error('encryption is no longer available (the connection has ended)');
+    }
+    return e;
+  }
+
+  function e2eeRoomOf(e) {
+    for (const r of rooms.values()) {
+      if (r.e2ee === e && r.room) {
+        return r.room;
+      }
+    }
+    throw new Error('encryption is no longer available (the connection has ended)');
+  }
+
+  // livekit-client applies keys either to everyone (with a shared key) or per participant.
+  function checkKeyMode(e, identity) {
+    if (!identity && !e.sharedKey) {
+      throw new Error('a shared key requires connecting with LiveKitE2eeOptions.shared_key set');
+    }
+    if (identity && e.sharedKey) {
+      throw new Error('per-participant keys require connecting without LiveKitE2eeOptions.shared_key');
+    }
+  }
+
+  Object.assign(api, {
+    e2ee_get_enabled(e2eeId) {
+      return e2eeOf(e2eeId).enabled;
+    },
+
+    e2ee_set_enabled(e2eeId, enabled) {
+      const e = e2eeOf(e2eeId);
+      e.enabled = !!enabled;
+      e2eeRoomOf(e).setE2EEEnabled(e.enabled).catch(warn('set_enabled'));
+    },
+
+    e2ee_set_key(e2eeId, identity, b64, keyIndex) {
+      const e = e2eeOf(e2eeId);
+      checkKeyMode(e, identity);
+      setKey(e, identity, fromBase64(b64), keyIndex);
+    },
+
+    e2ee_get_key(e2eeId, identity, keyIndex) {
+      const key = e2eeOf(e2eeId).keys.get(keyName(identity, keyIndex));
+      return key ? toBase64(key) : '';
+    },
+
+    e2ee_ratchet_key(e2eeId, identity, keyIndex) {
+      const e = e2eeOf(e2eeId);
+      checkKeyMode(e, identity);
+      ratchetKey(e, identity, keyIndex);
+    },
+
+    // One per published or subscribed track, as natively.
+    e2ee_frame_cryptors(e2eeId) {
+      const e = e2eeOf(e2eeId);
+      const room = e2eeRoomOf(e);
+      const cryptors = [];
+      for (const p of [room.localParticipant, ...room.remoteParticipants.values()]) {
+        for (const pub of p.trackPublications.values()) {
+          if (pub.track) {
+            const local = p === room.localParticipant;
+            const enabled = e.cryptorsEnabled.get(p.identity);
+            cryptors.push({
+              identity: p.identity,
+              key_index: e.keyIndexes.get(e.sharedKey ? '' : p.identity) || 0,
+              enabled: enabled !== undefined ? enabled : local ? e.enabled : !!pub.isEncrypted,
+            });
+          }
+        }
+      }
+      return cryptors;
+    },
+
+    e2ee_cryptor_set_enabled(e2eeId, identity, enabled) {
+      const e = e2eeOf(e2eeId);
+      // Not part of livekit-client's public API, which has no per-participant switch.
+      e2eeRoomOf(e).e2eeManager.setParticipantCryptorEnabled(!!enabled, identity);
+      e.cryptorsEnabled.set(identity, !!enabled);
+    },
+
+    // livekit-client switches key index by setting that key again. With a shared key, that switches
+    // every participant's.
+    e2ee_cryptor_set_key_index(e2eeId, identity, keyIndex) {
+      const e = e2eeOf(e2eeId);
+      const owner = e.sharedKey ? '' : identity;
+      const key = e.keys.get(keyName(owner, keyIndex));
+      if (!key) {
+        throw new Error(`no key has been set at index ${keyIndex}`);
+      }
+      setKey(e, owner, key, keyIndex, true);
+      e.keyIndexes.set(owner, keyIndex);
+    },
+  });
 
 
   // --- Audio ---

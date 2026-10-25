@@ -137,16 +137,16 @@ func _poll_both(condition: Callable, timeout_sec: float = 10.0) -> bool:
 	return false
 
 
-## Connect both rooms and wait for them to see each other.
+## Connect both rooms (with the given connect options) and wait for them to see each other.
 ## Returns true if both connected and discovered each other.
-func _connect_both_rooms() -> bool:
-	_room.connect_to_room(_livekit_url, _token_1, {})
+func _connect_both_rooms(options_1: Dictionary = {}, options_2: Dictionary = {}) -> bool:
+	_room.connect_to_room(_livekit_url, _token_1, options_1)
 	var r1 = await _poll_until(_room, func():
 		return _room.get_connection_state() == LiveKitRoom.STATE_CONNECTED, 15.0)
 	if not r1:
 		return false
 
-	_room2.connect_to_room(_livekit_url, _token_2, {})
+	_room2.connect_to_room(_livekit_url, _token_2, options_2)
 	var r2 = await _poll_until(_room2, func():
 		return _room2.get_connection_state() == LiveKitRoom.STATE_CONNECTED, 15.0)
 	if not r2:
