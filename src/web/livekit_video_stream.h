@@ -11,8 +11,8 @@
 
 namespace godot {
 
-// Web implementation of LiveKitVideoStream: a remote track plays in a hidden video element, and
-// poll() copies its newest frame (via a canvas) into the texture.
+// Web implementation of LiveKitVideoStream: the track plays in a hidden video element, and poll()
+// copies its newest frame into the texture.
 class LiveKitVideoStream : public RefCounted {
     GDCLASS(LiveKitVideoStream, RefCounted)
 
@@ -24,8 +24,6 @@ private:
     bool auto_poll_ = true;
 
     static Ref<LiveKitVideoStream> _create(const Variant &p_js_id);
-    void _register();
-    void _unregister();
 
 protected:
     static void _bind_methods();

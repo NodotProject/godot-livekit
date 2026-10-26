@@ -11,6 +11,8 @@
   // Values match the native binding's enums.
   const KIND = { audio: 1, video: 2 };
   const SOURCE = { camera: 1, microphone: 2, screen_share: 3, screen_share_audio: 4 };
+  // livekit-client's names for those sources, by value.
+  const SOURCE_NAMES = ['unknown', 'camera', 'microphone', 'screen_share', 'screen_share_audio'];
   const STREAM_STATE = { active: 1, paused: 2 };
   const CONNECTION_QUALITY = { poor: 0, good: 1, excellent: 2, lost: 3 };
   const DATA_KIND_LOSSY = 0;
@@ -257,6 +259,7 @@
     room.on(E.Disconnected, () => {
       r.state = STATE_DISCONNECTED;
       push(r, { type: 'disconnected' });
+      endTrackUse(r).forEach(stopIfReleased);
     });
     // livekit-client reports a signaling-only resume separately from a full reconnect, and a resume
     // can escalate into one. Native reports both as a single reconnect.
@@ -265,8 +268,7 @@
         // Matches the native binding: without auto-reconnect, a lost connection is a disconnect.
         r.state = STATE_DISCONNECTED;
         push(r, { type: 'disconnected' });
-        room.removeAllListeners();
-        room.disconnect();
+        closeRoom(r);
         return;
       }
       if (r.state === STATE_RECONNECTING) {
@@ -385,8 +387,7 @@
     }
     if (r.room) {
       // Client-initiated disconnects aren't reported, matching the native binding.
-      r.room.removeAllListeners();
-      r.room.disconnect().catch(() => {});
+      closeRoom(r);
       r.room = null;
     }
     r.state = STATE_DISCONNECTED;
@@ -395,10 +396,38 @@
     r.pending = [];
   }
 
+  // Disconnects the room without reporting its events. Its tracks stay usable, as natively, and
+  // are stopped once nothing uses them.
+  function closeRoom(r) {
+    const tracks = endTrackUse(r);
+    r.room.removeAllListeners();
+    r.room
+      .disconnect(false)
+      .catch(() => {})
+      .finally(() => tracks.forEach(stopIfReleased));
+  }
+
+  // Returns the tracks published through the connection, which no longer uses them.
+  function endTrackUse(r) {
+    const tracks = r.tracks;
+    r.tracks = new Set();
+    return tracks;
+  }
+
   const api = {
     room_create() {
       const id = nextId++;
-      rooms.set(id, { room: null, state: STATE_DISCONNECTED, events: [], pending: [], connected: false, names: new Map() });
+      rooms.set(id, {
+        room: null,
+        state: STATE_DISCONNECTED,
+        events: [],
+        pending: [],
+        connected: false,
+        names: new Map(),
+        // Local tracks published through the API and not unpublished since. livekit-client also
+        // unpublishes tracks itself, to republish them, so its publications can't tell.
+        tracks: new Set(),
+      });
       return id;
     },
 
@@ -417,7 +446,9 @@
       r.metadata = '';
       r.sid = '';
       r.names = new Map();
-      const roomOptions = { dynacast: !!options.dynacast, adaptiveStream: false };
+      // Tracks stay usable once unpublished, as natively, until nothing uses them (see
+      // stopIfReleased).
+      const roomOptions = { dynacast: !!options.dynacast, adaptiveStream: false, stopLocalTrackOnUnpublish: false };
       const fail = (e) => {
         teardown(r);
         r.events.push({ type: 'connection_failed', error: String((e && e.message) || e) });
@@ -554,9 +585,9 @@
       whenDataEncryptable(r)
         .then(() => lp.performRpc({ destinationIdentity: destination, method, payload, responseTimeout: timeout * 1000 }))
         .then(
-        (result) => report({ type: 'rpc_response_received', result: result || '' }),
-        (e) => report({ type: 'rpc_error', message: (e && e.message) || String(e) }),
-      );
+          (result) => report({ type: 'rpc_response_received', result: result || '' }),
+          (e) => report({ type: 'rpc_error', message: (e && e.message) || String(e) }),
+        );
     },
 
     local_register_rpc_method(id, participantId, method) {
@@ -590,7 +621,11 @@
       const lp = localParticipantOf(id, participantId);
       const pub = lp.trackPublications.get(sid);
       if (pub && pub.track) {
-        lp.unpublishTrack(pub.track).catch(warn('unpublish_track'));
+        const track = pub.track;
+        roomOf(id).tracks.delete(track);
+        lp.unpublishTrack(track)
+          .catch(warn('unpublish_track'))
+          .finally(() => stopIfReleased(track));
       }
     },
 
@@ -639,6 +674,21 @@
   //
   // livekit-client encrypts media in a worker, which an export has no file for, so the build
   // embeds its source. Keys are kept here too, since livekit-client can't export them.
+  //
+  // What must hold, using the state that newE2ee() describes:
+  // - Nothing is sent unencrypted while encryption is enabled. The connection is only reported
+  //   once the worker confirms that encryption is on, and sends wait for the key and encryption
+  //   changes requested before them, then fail rather than send unencrypted.
+  // - Key changes reach livekit-client in the order they're made, and a ratchet applies to the key
+  //   as of the changes before it (keyUpdates). get_key() returns a key as soon as it's set
+  //   (keys), while sends check what livekit-client has been given (appliedKeys).
+  // - Each change to whether the local participant encrypts waits for the worker to confirm the
+  //   one before it (enableUpdates), since livekit-client skips a change that matches the state it
+  //   last confirmed.
+  // - Only selecting a shared or local key's index changes the index livekit-client selects again
+  //   on reconnect, so selecting a remote participant's key never switches the local one.
+  // - A ratchet the worker reports only replaces the key it's a ratchet of.
+  // - Objects from an ended connection stop working (e2ees).
 
   const E2EE_WORKER = window.GodotLiveKitE2eeWorker;
   delete window.GodotLiveKitE2eeWorker;
@@ -975,6 +1025,7 @@
       } else {
         update();
       }
+      return true;
     },
 
     // livekit-client switches key index by setting that key again. With a shared key, that switches
@@ -989,6 +1040,7 @@
       // The key is read once earlier updates are done, so that a pending ratchet isn't undone.
       queueKeyUpdate(e, 'setting the key index', () => applyKey(e, owner, e.appliedKeys.get(name), keyIndex, true));
       e.keyIndexes.set(owner, keyIndex);
+      return true;
     },
   });
 
@@ -1112,8 +1164,11 @@
   let workletsReady = null;
   const sources = new Map();
   const streams = new Map();
-  // Placeholder publications are held until livekit-client finishes publishing.
+  // Placeholder publications are held until livekit-client finishes publishing, which keeps their
+  // tracks in use until then.
   const pendingPublications = new Set();
+  // Local tracks whose creating wrapper is gone.
+  const releasedTracks = new WeakSet();
   // Source channel counts by track. livekit-client otherwise decides whether to publish stereo
   // from the track's reported settings, which don't reliably reflect a Web Audio destination's.
   const sourceChannels = new WeakMap();
@@ -1207,12 +1262,23 @@
     if (!st) {
       return 0;
     }
-    let frames = 0;
-    while (frames < maxFrames && st.chunks.length) {
+    // As natively, audio that doesn't fit is dropped rather than left to play late (after the game
+    // stalls, say). Here it's the oldest, so that what plays is current.
+    takeStreamFrames(st, st.queued - maxFrames, null, 0);
+    return takeStreamFrames(st, maxFrames, heap, offset);
+  }
+
+  // Removes up to `frames` of the stream's oldest audio, copying it into heap at offset unless
+  // heap is null. Returns how many frames were removed.
+  function takeStreamFrames(st, frames, heap, offset) {
+    let taken = 0;
+    while (taken < frames && st.chunks.length) {
       const chunk = st.chunks[0];
-      const n = Math.min(maxFrames - frames, (chunk.length - st.offset) / 2);
-      heap.set(chunk.subarray(st.offset, st.offset + n * 2), offset + frames * 2);
-      frames += n;
+      const n = Math.min(frames - taken, (chunk.length - st.offset) / 2);
+      if (heap) {
+        heap.set(chunk.subarray(st.offset, st.offset + n * 2), offset + taken * 2);
+      }
+      taken += n;
       st.offset += n * 2;
       st.queued -= n;
       if (st.offset >= chunk.length) {
@@ -1220,7 +1286,7 @@
         st.offset = 0;
       }
     }
-    return frames;
+    return taken;
   }
 
   function attachStream(st, track) {
@@ -1250,11 +1316,7 @@
         st.channels = e.data.channels;
         st.chunks.push(e.data.data);
         st.queued += e.data.data.length / 2;
-        while (st.queued > ctx.sampleRate * MAX_STREAM_SECONDS && st.chunks.length > 1) {
-          st.queued -= (st.chunks[0].length - st.offset) / 2;
-          st.chunks.shift();
-          st.offset = 0;
-        }
+        takeStreamFrames(st, st.queued - ctx.sampleRate * MAX_STREAM_SECONDS, null, 0);
       };
       // Worklets are only processed while connected toward the destination.
       st.silence = ctx.createGain();
@@ -1266,6 +1328,7 @@
   }
 
   function detachStream(st) {
+    const track = st.track;
     if (st.node) {
       stopWorklet(st.node);
     }
@@ -1278,6 +1341,7 @@
       st.element.srcObject = null;
     }
     st.track = st.input = st.node = st.silence = st.element = null;
+    stopIfReleased(track);
   }
 
   function stopWorklet(node) {
@@ -1287,11 +1351,54 @@
     node.disconnect();
   }
 
+  // Stops a local track once its creating wrapper is gone and nothing else uses it, since browsers
+  // keep a track running until it's stopped.
+  function stopIfReleased(track) {
+    if (!track || !releasedTracks.has(track) || trackInUse(track)) {
+      return;
+    }
+    const s = videoCaptureTracks.get(track.mediaStreamTrack);
+    if (s) {
+      s.tracks.delete(track.mediaStreamTrack);
+    }
+    track.stop();
+  }
+
+  function trackInUse(track) {
+    const uses = (items) => [...items].some((item) => item.track === track);
+    return (
+      [...rooms.values()].some((r) => r.tracks.has(track)) ||
+      uses(pendingPublications) ||
+      uses(streams.values()) ||
+      uses(videoStreams.values())
+    );
+  }
+
   function newStream() {
     const id = nextId++;
     const st = { chunks: [], offset: 0, queued: 0, channels: 1, closed: false };
     streams.set(id, st);
     return [id, st];
+  }
+
+  // Attaches a stream to the participant's track of a kind and source, as the native binding's
+  // streams do, including the tracks it's subscribed to later.
+  function followParticipant(st, participant, kind, source, attach) {
+    const matches = (track) => track && track.kind === kind && track.source === SOURCE_NAMES[source];
+    for (const pub of participant.trackPublications.values()) {
+      if (matches(pub.track)) {
+        attach(st, pub.track);
+      }
+    }
+    st.onSubscribed = (track) => matches(track) && attach(st, track);
+    participant.on(LK.ParticipantEvent.TrackSubscribed, st.onSubscribed);
+    st.participant = participant;
+  }
+
+  function unfollowParticipant(st) {
+    if (st.participant) {
+      st.participant.off(LK.ParticipantEvent.TrackSubscribed, st.onSubscribed);
+    }
   }
 
   Object.assign(api, {
@@ -1388,6 +1495,14 @@
       return trackInfo(track);
     },
 
+    local_track_release(trackId) {
+      const track = objectOf(trackId);
+      if (track) {
+        releasedTracks.add(track);
+        stopIfReleased(track);
+      }
+    },
+
     track_set_muted(trackId, muted) {
       const track = objectOf(trackId);
       if (track && typeof track.mute === 'function') {
@@ -1401,10 +1516,9 @@
       if (!track) {
         throw new Error('invalid track');
       }
-      const sourceNames = ['unknown', 'camera', 'microphone', 'screen_share', 'screen_share_audio'];
       const publishOptions = { name: track.name || undefined };
       if ('source' in options) {
-        publishOptions.source = sourceNames[options.source] || 'unknown';
+        publishOptions.source = SOURCE_NAMES[options.source] || 'unknown';
         track.source = publishOptions.source;
       }
       if (sourceChannels.has(track)) {
@@ -1418,35 +1532,26 @@
       // livekit-client publishes asynchronously, so a placeholder stands in until it's done.
       const placeholder = { pending: true, track };
       pendingPublications.add(placeholder);
-      publishedTracks.add(track);
       const pubId = idOf(placeholder);
-      whenEncryptionSettled(roomOf(id))
+      const r = roomOf(id);
+      // This connection's, even if it has ended by the time publishing finishes.
+      const tracks = r.tracks;
+      whenEncryptionSettled(r)
         .then(() => lp.publishTrack(track, publishOptions))
-        .then(
-          (pub) => {
-            promote(pubId, placeholder, pub);
-            const source = videoCaptureTracks.get(track.mediaStreamTrack);
-            if (source) {
-              resendVideoFrames(source, track.mediaStreamTrack);
-            }
-          },
-          (e) => {
-            pendingPublications.delete(placeholder);
-            // Nothing owns the track after all, unless it's published or being published elsewhere.
-            const owned =
-              [...pendingPublications].some((p) => p.track === track) ||
-              [...rooms.values()].some(
-                (r) => r.room && [...r.room.localParticipant.trackPublications.values()].some((p) => p.track === track),
-              );
-            if (!owned) {
-              publishedTracks.delete(track);
-              stopIfReleased(track);
-            }
-            throw e;
-          },
-        )
+        .then((pub) => {
+          tracks.add(track);
+          promote(pubId, placeholder, pub);
+          const source = videoCaptureTracks.get(track.mediaStreamTrack);
+          if (source) {
+            resendVideoFrames(source, track.mediaStreamTrack);
+          }
+        })
         .catch(warn('publish_track'))
-        .finally(() => pendingPublications.delete(placeholder));
+        .finally(() => {
+          pendingPublications.delete(placeholder);
+          // In case publishing failed, or the connection has ended.
+          stopIfReleased(track);
+        });
       return publicationInfo(placeholder);
     },
 
@@ -1462,18 +1567,8 @@
 
     stream_from_participant(roomId, participantId, source) {
       const participant = remoteParticipantOf(roomId, participantId);
-      const sourceName = ['unknown', 'camera', 'microphone', 'screen_share', 'screen_share_audio'][source];
       const [id, st] = newStream();
-      const matches = (track) => track && track.kind === 'audio' && track.source === sourceName;
-      for (const pub of participant.trackPublications.values()) {
-        if (matches(pub.track)) {
-          attachStream(st, pub.track);
-        }
-      }
-      // Like the native binding, the stream follows the participant's track for that source.
-      st.onSubscribed = (track) => matches(track) && attachStream(st, track);
-      participant.on(LK.ParticipantEvent.TrackSubscribed, st.onSubscribed);
-      st.participant = participant;
+      followParticipant(st, participant, 'audio', source, attachStream);
       return id;
     },
 
@@ -1487,9 +1582,7 @@
       if (st) {
         st.closed = true;
         detachStream(st);
-        if (st.participant) {
-          st.participant.off(LK.ParticipantEvent.TrackSubscribed, st.onSubscribed);
-        }
+        unfollowParticipant(st);
         streams.delete(id);
       }
     },
@@ -1505,9 +1598,6 @@
   const videoStreams = new Map();
   // Local video tracks' canvas capture tracks, mapped to their sources.
   const videoCaptureTracks = new WeakMap();
-  // Local video tracks whose creating wrapper is gone, and those that have been published.
-  const releasedTracks = new WeakSet();
-  const publishedTracks = new WeakSet();
   const RESEND_INTERVAL_MS = 200;
   const RESEND_DURATION_MS = 3000;
   // Whether VideoFrame.copyTo can convert frames to RGBA, until a browser shows it can't.
@@ -1750,25 +1840,7 @@
       st.element.remove();
     }
     st.track = st.element = st.ready = null;
-    if (track) {
-      stopIfReleased(track);
-    }
-  }
-
-  function stopIfReleased(track) {
-    if (!releasedTracks.has(track) || publishedTracks.has(track)) {
-      return;
-    }
-    for (const st of videoStreams.values()) {
-      if (st.track === track) {
-        return;
-      }
-    }
-    const s = videoCaptureTracks.get(track.mediaStreamTrack);
-    if (s) {
-      s.tracks.delete(track.mediaStreamTrack);
-    }
-    track.stop();
+    stopIfReleased(track);
   }
 
   function newVideoStream() {
@@ -1818,16 +1890,6 @@
       return trackInfo(track);
     },
 
-    // Stops a created local video track once nothing will use it. Tracks that have been published
-    // are left to the SDK, which stops them when they're unpublished.
-    local_video_track_release(trackId) {
-      const track = objectOf(trackId);
-      if (track) {
-        releasedTracks.add(track);
-        stopIfReleased(track);
-      }
-    },
-
     video_stream_from_track(trackId) {
       const track = objectOf(trackId);
       if (!track || track.kind !== 'video') {
@@ -1840,18 +1902,8 @@
 
     video_stream_from_participant(roomId, participantId, source) {
       const participant = remoteParticipantOf(roomId, participantId);
-      const sourceName = ['unknown', 'camera', 'microphone', 'screen_share', 'screen_share_audio'][source];
       const [id, st] = newVideoStream();
-      const matches = (track) => track && track.kind === 'video' && track.source === sourceName;
-      for (const pub of participant.trackPublications.values()) {
-        if (matches(pub.track)) {
-          attachVideo(st, pub.track);
-        }
-      }
-      // Like the native binding, the stream follows the participant's track for that source.
-      st.onSubscribed = (track) => matches(track) && attachVideo(st, track);
-      participant.on(LK.ParticipantEvent.TrackSubscribed, st.onSubscribed);
-      st.participant = participant;
+      followParticipant(st, participant, 'video', source, attachVideo);
       return id;
     },
 
@@ -1860,9 +1912,7 @@
       if (st) {
         st.closed = true;
         detachVideo(st);
-        if (st.participant) {
-          st.participant.off(LK.ParticipantEvent.TrackSubscribed, st.onSubscribed);
-        }
+        unfollowParticipant(st);
         videoStreams.delete(id);
       }
     },

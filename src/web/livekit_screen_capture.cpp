@@ -1,17 +1,15 @@
 #include "livekit_screen_capture.h"
 
 #include "web_bridge.h"
+#include "web_poll_list.h"
 #include "web_video.h"
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <algorithm>
-#include <vector>
-
 using namespace godot;
 
-// Captures that poll automatically: those made by a factory, as natively, with auto_poll enabled.
-static std::vector<LiveKitScreenCapture *> polled_captures;
+// Only captures made by a factory poll automatically, as natively.
+static WebPollList<LiveKitScreenCapture> polled_captures;
 
 void LiveKitScreenCapture::_bind_methods() {
     ClassDB::bind_static_method("LiveKitScreenCapture", D_METHOD("get_monitors"), &LiveKitScreenCapture::get_monitors);
@@ -48,7 +46,7 @@ void LiveKitScreenCapture::_bind_methods() {
 }
 
 LiveKitScreenCapture::~LiveKitScreenCapture() {
-    _unregister();
+    polled_captures.remove(this);
     close();
 }
 
@@ -90,7 +88,7 @@ Ref<LiveKitScreenCapture> LiveKitScreenCapture::create() {
     capture.instantiate();
     capture->js_id_ = js_id;
     capture->texture_.instantiate();
-    capture->_register();
+    polled_captures.add(capture.ptr());
     return capture;
 }
 
@@ -186,9 +184,9 @@ void LiveKitScreenCapture::set_auto_poll(bool enabled) {
     }
     auto_poll_ = enabled;
     if (enabled) {
-        _register();
+        polled_captures.add(this);
     } else {
-        _unregister();
+        polled_captures.remove(this);
     }
 }
 
@@ -196,23 +194,6 @@ bool LiveKitScreenCapture::get_auto_poll() const {
     return auto_poll_;
 }
 
-void LiveKitScreenCapture::_register() {
-    if (auto_poll_ && std::find(polled_captures.begin(), polled_captures.end(), this) == polled_captures.end()) {
-        polled_captures.push_back(this);
-    }
-}
-
-void LiveKitScreenCapture::_unregister() {
-    polled_captures.erase(std::remove(polled_captures.begin(), polled_captures.end(), this), polled_captures.end());
-}
-
 void LiveKitScreenCapture::poll_all() {
-    // frame_received handlers may create or free captures, so poll a snapshot and skip freed ones.
-    std::vector<LiveKitScreenCapture *> captures = polled_captures;
-    for (LiveKitScreenCapture *capture : captures) {
-        if (std::find(polled_captures.begin(), polled_captures.end(), capture) != polled_captures.end()) {
-            Ref<LiveKitScreenCapture> keep_alive(capture);
-            capture->poll();
-        }
-    }
+    polled_captures.poll_all(&LiveKitScreenCapture::poll);
 }

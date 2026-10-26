@@ -225,6 +225,23 @@ func test_encryption_turned_off_and_on_again_stays_on():
 	_close(video)
 
 
+func test_video_flows_unencrypted_once_encryption_is_turned_off():
+	if _skip_if_unsupported():
+		return
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options("wrong key")), "Both rooms should connect")
+	var video := _publish_red_video()
+	# Published first, so that turning encryption off republishes the track.
+	var local := _room.get_local_participant()
+	assert_true(await _poll_until(_room, func(): return not local.get_track_publications().is_empty(), 10.0), "video published")
+
+	_room.get_e2ee_manager().set_enabled(false)
+	# Room2 can only decode the video if it isn't encrypted.
+	var frames := await _count_red_frames(video, 5, 15.0)
+
+	assert_gte(frames, 5, "Room2 should receive the unencrypted video")
+	_close(video)
+
+
 func test_data_sent_as_encryption_is_turned_back_on_is_delivered():
 	if _skip_if_unsupported():
 		return

@@ -9,6 +9,7 @@ The web build is meant to behave like the native one, and the shared tests in `t
 - **Single-threaded only.** The web build is single-threaded, like Godot's default web templates, so enable **Extensions Support** in the Web export preset and leave **Thread Support** off.
 - **Events arrive between frames.** The browser delivers LiveKit events while the game isn't running, so wait for them by yielding (e.g. `await get_tree().process_frame`). A blocking loop like `OS.delay_msec()` never sees them.
 - **Tested in Chrome.** The automated tests run in headless Chrome. Firefox and Safari aren't covered by them yet.
+- **Some failures are logged later.** Operations that the browser completes asynchronously (e.g. publishing a track or data, setting metadata, or changing encryption keys) report failures as browser console warnings once they fail, rather than with `push_error()` when called.
 
 ## Unavailable
 
@@ -17,7 +18,7 @@ The web build is meant to behave like the native one, and the shared tests in `t
 ## Rooms and participants
 
 - **Participants belong to their connection.** A participant object kept from an earlier connection reports "participant is no longer connected" when used, rather than acting on a later connection's participant. (Natively, the SDK has freed those participants.)
-- **Publishing is asynchronous.** The publication `publish_track()` returns starts with an empty sid, which fills in once `local_track_published` fires.
+- **Publishing is asynchronous.** The publication `publish_track()` returns starts with an empty sid, which fills in once `local_track_published` fires. From then on, `get_track_publications()` includes it.
 
 ## Audio
 
@@ -49,6 +50,7 @@ Media and data are encrypted by livekit-client's encryption worker, which is emb
 - **Ratcheting is asynchronous.** `ratchet_shared_key()` and `ratchet_key()` return an empty array, and the new key is available from `get_shared_key()` or `get_key()` once it's ready.
 - **Keys are shared or per-participant, not both.** Setting a shared key requires connecting with `LiveKitE2eeOptions.shared_key`, and per-participant keys require connecting without it. Mixing them is an error.
 - **`set_key_index()` with a shared key switches every participant's key index,** since livekit-client keeps one index for the shared key.
+- **`set_key_index()` fails if no key has been set at that index,** rather than switching to a missing key, since livekit-client switches index by setting that index's key again.
 - **Unsupported options fail the connection:** `ENCRYPTION_CUSTOM`, a `ratchet_salt` that isn't valid UTF-8 (livekit-client takes the salt as a string), or a browser without encryption support. With `ENCRYPTION_NONE`, `get_e2ee_manager()` returns null.
 - **`e2ee_state_changed` only reports what the worker does:** failures (3 for a failed decryption, 4 for a missing key, 6 for an internal error) and automatic ratchets of per-participant keys (5), never 0 (new) or 1 (OK).
 - **`get_frame_cryptors()` returns snapshots.** Each cryptor reflects its track's settings when it was returned, plus changes made through it.
