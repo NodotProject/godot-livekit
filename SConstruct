@@ -226,6 +226,9 @@ else:  # linux, android
 # file-extension suffix (which causes "should have exactly one target
 # with the suffix: .dll").
 lib_name = f"{env['SHLIBPREFIX']}godot-livekit.{platform}.{arch}{env['SHLIBSUFFIX']}"
+if platform == 'windows':
+    src_files.append('src/windows_pin.cpp')
+
 library = env.SharedLibrary(target=lib_name, source=src_files)
 installed_library = env.Install('addons/godot-livekit/bin', library)
 Default(installed_library)
