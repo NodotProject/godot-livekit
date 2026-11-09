@@ -268,7 +268,7 @@ bool LiveKitRoom::connect_to_room(const String &url, const String &token, const 
     connect_thread_.start([this, alive, room_ptr, url_str, token_str, room_options]() {
         bool success = false;
         try {
-            success = room_ptr->Connect(url_str.c_str(), token_str.c_str(), room_options);
+            success = room_ptr->connect(url_str.c_str(), token_str.c_str(), room_options);
         } catch (const std::exception &e) {
             UtilityFunctions::push_error("LiveKitRoom::connect_to_room: connection failed: ", String(e.what()));
         } catch (...) {
@@ -304,7 +304,7 @@ void LiveKitRoom::_finalize_connection(bool success) {
         connection_state = STATE_CONNECTED;
 
         // Initialize local participant
-        livekit::LocalParticipant *lp = room->localParticipant();
+        livekit::LocalParticipant *lp = room->localParticipant().lock().get();
         if (lp) {
             local_participant.instantiate();
             local_participant->bind_participant(lp);
@@ -316,15 +316,15 @@ void LiveKitRoom::_finalize_connection(bool success) {
         for (auto const &r : remotes) {
             Ref<LiveKitRemoteParticipant> p;
             p.instantiate();
-            p->bind_participant(r.get());
-            p->bind_remote_participant(static_cast<livekit::RemoteParticipant *>(r.get()));
+            p->bind_participant(r.lock().get());
+            p->bind_remote_participant(static_cast<livekit::RemoteParticipant *>(r.lock().get()));
             std::lock_guard<std::mutex> plock(participants_mutex_);
             remote_participants[p->get_identity()] = p;
         }
 
 #ifdef LIVEKIT_E2EE_SUPPORTED
         // Initialize E2EE manager if available
-        livekit::E2EEManager *mgr = room->e2eeManager();
+        livekit::E2EEManager *mgr = room->e2eeManager().lock().get();
         if (mgr) {
             e2ee_manager_.instantiate();
             e2ee_manager_->bind_manager(mgr);
@@ -440,7 +440,7 @@ String LiveKitRoom::get_sid() const {
     if (connecting_async_.load() || connection_state.load() != STATE_CONNECTED)
         return String();
     if (room) {
-        auto info = room->room_info();
+        auto info = room->roomInfo();
         if (info.sid.has_value()) {
             return String(info.sid.value().c_str());
         }
@@ -452,7 +452,7 @@ String LiveKitRoom::get_name() const {
     if (connecting_async_.load() || connection_state.load() != STATE_CONNECTED)
         return String();
     if (room) {
-        auto info = room->room_info();
+        auto info = room->roomInfo();
         return String(info.name.c_str());
     }
     return String();
@@ -462,7 +462,7 @@ String LiveKitRoom::get_metadata() const {
     if (connecting_async_.load() || connection_state.load() != STATE_CONNECTED)
         return String();
     if (room) {
-        auto info = room->room_info();
+        auto info = room->roomInfo();
         return String(info.metadata.c_str());
     }
     return String();

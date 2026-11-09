@@ -46,10 +46,10 @@ void LiveKitAudioStream::_reader_loop() {
 
         const auto &frame = event.frame;
         const auto &pcm_data = frame.data();
-        int channels = frame.num_channels();
+        int channels = frame.numChannels();
 
         // Update sample rate/channels from actual frame data
-        sample_rate_ = frame.sample_rate();
+        sample_rate_ = frame.sampleRate();
         num_channels_ = channels;
 
         // Convert int16 interleaved PCM to float32 using persistent buffer.

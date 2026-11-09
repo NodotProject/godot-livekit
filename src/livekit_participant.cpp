@@ -238,7 +238,19 @@ Ref<LiveKitLocalTrackPublication> LiveKitLocalParticipant::publish_track(const R
     }
     // video_codec is a VideoCodec enum in the SDK - not easily set from string
 
-    auto native_pub = local_participant_->publishTrack(native_track, pub_options);
+    // The SDK's publishTrack throws on failure and leaves the publication on the track.
+    try {
+        local_participant_->publishTrack(native_track, pub_options);
+    } catch (const std::exception &e) {
+        UtilityFunctions::push_error("LiveKitLocalParticipant::publish_track: ", String(e.what()));
+        return Ref<LiveKitLocalTrackPublication>();
+    }
+    std::shared_ptr<livekit::LocalTrackPublication> native_pub;
+    if (auto audio = std::dynamic_pointer_cast<livekit::LocalAudioTrack>(native_track)) {
+        native_pub = audio->publication();
+    } else if (auto video = std::dynamic_pointer_cast<livekit::LocalVideoTrack>(native_track)) {
+        native_pub = video->publication();
+    }
     if (!native_pub) {
         UtilityFunctions::push_error("LiveKitLocalParticipant::publish_track: publish failed");
         return Ref<LiveKitLocalTrackPublication>();

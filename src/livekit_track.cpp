@@ -327,7 +327,7 @@ bool LiveKitTrack::get_muted() const {
 
 int LiveKitTrack::get_stream_state() const {
     if (track_) {
-        return (int)track_->stream_state();
+        return (int)track_->streamState();
     }
     return STATE_UNKNOWN;
 }
