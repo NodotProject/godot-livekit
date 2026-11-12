@@ -1,6 +1,6 @@
 # Web build
 
-Web exports can't load the native LiveKit SDK, so the web build implements the same classes on top of [livekit-client](https://github.com/livekit/client-sdk-js) (2.22.3, embedded in the extension). The C++ in this directory registers the classes and calls `bridge.js`, which drives livekit-client and queues its events for the frame callback to emit as signals.
+Web exports can't load the native LiveKit SDK, so the web build implements the same classes on top of [livekit-client](https://github.com/livekit/client-sdk-js) (2.24.0, embedded in the extension). The C++ in this directory registers the classes and calls `bridge.js`, which drives livekit-client and queues its events for the frame callback to emit as signals.
 
 The web build is meant to behave like the native one, and the shared tests in `test/` run against both. This page lists where it can't, with the reasons. The [README's web section](../../README.md#web) covers the export settings.
 
@@ -58,4 +58,3 @@ Media and data are encrypted by livekit-client's encryption worker, which is emb
 - **Sends wait for encryption.** The connection is only reported once the worker confirms encryption is on. `publish_data()`, `perform_rpc()` and `publish_track()` wait for key and encryption changes requested before them, then fail rather than send unencrypted if encryption is on but couldn't start, if the local participant's frame cryptor is disabled, or (for data) if the local participant has no key.
 - **A shared key's automatic ratchets aren't visible.** The worker only reports ratchets of per-participant keys, so `get_shared_key()` keeps returning the key from before a receiver ratcheted it.
 - **With `failure_tolerance` of 0 or more,** a shared or local key that's exceeded it at an index that isn't current only recovers once `set_key_index()` switches to that index. (Remote participants' keys, and the current index, recover when they're set again.)
-- **Data-only receivers don't follow a sender's ratchet.** A receiver that gets data, but no media, from a sender can't decrypt that sender's data after it ratchets its key. That's a livekit-client bug ([livekit/client-sdk-js#2187](https://github.com/livekit/client-sdk-js/issues/2187)). Media frames do ratchet the receiver's key, after which data decrypts too. Otherwise, set the ratcheted key on the receiver.
