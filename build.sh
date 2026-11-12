@@ -236,8 +236,11 @@ fetch_livekit_js() {
     verify_checksum "${archive}" "${LIVEKIT_JS_SHA256}"
     rm -rf livekit-js
     mkdir -p livekit-js
-    tar -xzf "${archive}" -C livekit-js --strip-components=2 package/dist/livekit-client.umd.js package/dist/livekit-client.e2ee.worker.js
-    tar -xzf "${archive}" -C livekit-js --strip-components=1 package/LICENSE
+    # npm gives every file the same 1985 timestamp, which SCons would take to mean that a
+    # different version's files are unchanged, and keep embedding the old version. (-m stamps
+    # them with the current time instead.)
+    tar -xmzf "${archive}" -C livekit-js --strip-components=2 package/dist/livekit-client.umd.js package/dist/livekit-client.e2ee.worker.js
+    tar -xmzf "${archive}" -C livekit-js --strip-components=1 package/LICENSE
     rm "${archive}"
     echo "$LIVEKIT_JS_VERSION" > livekit-js/.version
     echo -e "${GREEN}livekit-client downloaded successfully!${NC}"
