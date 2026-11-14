@@ -77,7 +77,8 @@ Ref<LiveKitVideoStream> LiveKitVideoStream::from_track(const Ref<LiveKitTrack> &
 }
 
 Ref<LiveKitVideoStream> LiveKitVideoStream::from_participant(const Ref<LiveKitRemoteParticipant> &participant, int source) {
-    if (participant.is_null() || !participant->get_native_remote_participant()) {
+    auto native_participant = participant.is_valid() ? participant->get_native_remote_participant() : nullptr;
+    if (!native_participant) {
         UtilityFunctions::push_error("LiveKitVideoStream::from_participant: invalid participant");
         return Ref<LiveKitVideoStream>();
     }
@@ -86,7 +87,7 @@ Ref<LiveKitVideoStream> LiveKitVideoStream::from_participant(const Ref<LiveKitRe
     opts.format = livekit::VideoBufferType::RGBA;
 
     auto native_stream = livekit::VideoStream::fromParticipant(
-            *participant->get_native_remote_participant(),
+            *native_participant,
             (livekit::TrackSource)source,
             opts);
     if (!native_stream) {

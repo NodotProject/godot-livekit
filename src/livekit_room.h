@@ -91,7 +91,7 @@ private:
     std::atomic<bool> disconnected_emitted_{false};
 
     // Connection timeout: poll_events() checks elapsed time and forces
-    // failure when Connect() takes longer than this (seconds, 0 = no limit).
+    // failure when connect() takes longer than this (seconds, 0 = no limit).
     double connect_timeout_sec_{15.0};
     uint64_t connect_start_ms_{0};
 

@@ -105,7 +105,8 @@ Ref<LiveKitAudioStream> LiveKitAudioStream::from_track(const Ref<LiveKitTrack> &
 }
 
 Ref<LiveKitAudioStream> LiveKitAudioStream::from_participant(const Ref<LiveKitRemoteParticipant> &participant, int source) {
-    if (participant.is_null() || !participant->get_native_remote_participant()) {
+    auto native_participant = participant.is_valid() ? participant->get_native_remote_participant() : nullptr;
+    if (!native_participant) {
         UtilityFunctions::push_error("LiveKitAudioStream::from_participant: invalid participant");
         return Ref<LiveKitAudioStream>();
     }
@@ -113,7 +114,7 @@ Ref<LiveKitAudioStream> LiveKitAudioStream::from_participant(const Ref<LiveKitRe
     livekit::AudioStream::Options opts;
 
     auto native_stream = livekit::AudioStream::fromParticipant(
-            *participant->get_native_remote_participant(),
+            *native_participant,
             (livekit::TrackSource)source,
             opts);
     if (!native_stream) {

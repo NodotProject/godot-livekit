@@ -11,6 +11,7 @@
 #include <livekit/local_participant.h>
 #include <livekit/remote_participant.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -35,13 +36,14 @@ public:
 
 protected:
     static void _bind_methods();
-    livekit::Participant *participant_ = nullptr;
+    // Weak, since the room owns its participants and frees them once they disconnect.
+    std::weak_ptr<livekit::Participant> participant_;
 
 public:
     LiveKitParticipant();
     ~LiveKitParticipant();
 
-    virtual void bind_participant(livekit::Participant *p_participant);
+    void bind_participant(const std::weak_ptr<livekit::Participant> &p_participant);
 
     String get_sid() const;
     String get_name() const;
@@ -55,7 +57,9 @@ class LiveKitLocalParticipant : public LiveKitParticipant {
     GDCLASS(LiveKitLocalParticipant, LiveKitParticipant)
 
 private:
-    livekit::LocalParticipant *local_participant_ = nullptr;
+    // The SDK only holds published tracks weakly, and forgets their publications and events once
+    // they're freed, so these keep them alive until they're unpublished.
+    std::vector<std::shared_ptr<livekit::Track>> published_tracks_;
     std::vector<std::string> registered_rpc_methods_;
     DetachableThread rpc_thread_;
 
@@ -66,8 +70,7 @@ public:
     LiveKitLocalParticipant();
     ~LiveKitLocalParticipant();
 
-    void bind_local_participant(livekit::LocalParticipant *p);
-    livekit::LocalParticipant *get_native_local_participant() const { return local_participant_; }
+    std::shared_ptr<livekit::LocalParticipant> get_native_local_participant() const;
 
     void publish_data(const PackedByteArray &data, bool reliable, const PackedStringArray &destination_identities, const String &topic);
     void set_metadata(const String &metadata);
@@ -89,9 +92,6 @@ public:
 class LiveKitRemoteParticipant : public LiveKitParticipant {
     GDCLASS(LiveKitRemoteParticipant, LiveKitParticipant)
 
-private:
-    livekit::RemoteParticipant *remote_participant_ = nullptr;
-
 protected:
     static void _bind_methods();
 
@@ -99,8 +99,7 @@ public:
     LiveKitRemoteParticipant();
     ~LiveKitRemoteParticipant();
 
-    void bind_remote_participant(livekit::RemoteParticipant *p);
-    livekit::RemoteParticipant *get_native_remote_participant() const { return remote_participant_; }
+    std::shared_ptr<livekit::RemoteParticipant> get_native_remote_participant() const;
 
     Dictionary get_track_publications() const;
 };

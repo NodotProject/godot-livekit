@@ -59,7 +59,7 @@ class LiveKitKeyProvider : public RefCounted {
     GDCLASS(LiveKitKeyProvider, RefCounted)
 
 private:
-    livekit::E2EEManager::KeyProvider *key_provider_ = nullptr;
+    std::weak_ptr<livekit::E2EEManager::KeyProvider> key_provider_;
 
 protected:
     static void _bind_methods();
@@ -68,7 +68,7 @@ public:
     LiveKitKeyProvider();
     ~LiveKitKeyProvider();
 
-    void bind_key_provider(livekit::E2EEManager::KeyProvider *kp);
+    void bind_key_provider(const std::weak_ptr<livekit::E2EEManager::KeyProvider> &kp);
 
     void set_shared_key(const PackedByteArray &key, int key_index);
     PackedByteArray get_shared_key(int key_index) const;
@@ -111,7 +111,8 @@ class LiveKitE2eeManager : public RefCounted {
     GDCLASS(LiveKitE2eeManager, RefCounted)
 
 private:
-    livekit::E2EEManager *e2ee_manager_ = nullptr;
+    // Weak, since the room owns its manager and frees it on disconnect.
+    std::weak_ptr<livekit::E2EEManager> e2ee_manager_;
     Ref<LiveKitKeyProvider> key_provider_;
 
 protected:
@@ -121,7 +122,7 @@ public:
     LiveKitE2eeManager();
     ~LiveKitE2eeManager();
 
-    void bind_manager(livekit::E2EEManager *mgr);
+    void bind_manager(const std::weak_ptr<livekit::E2EEManager> &mgr);
 
     bool get_enabled() const;
     void set_enabled(bool enabled);

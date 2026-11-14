@@ -7,7 +7,7 @@ const KEY := "correct horse battery staple"
 
 
 func test_encrypted_media_and_data_reach_room_with_same_key():
-	if _skip_if_unsupported():
+	if _skip_if_no_server():
 		return
 	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
 	var statuses := {}
@@ -30,7 +30,7 @@ func test_encrypted_media_and_data_reach_room_with_same_key():
 
 
 func test_room_with_a_different_key_cannot_decode():
-	if _skip_if_unsupported():
+	if _skip_if_no_server():
 		return
 	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options("wrong key")), "Both rooms should connect")
 	var received := []
@@ -45,7 +45,7 @@ func test_room_with_a_different_key_cannot_decode():
 
 
 func test_rotated_key_is_used_once_switched_to():
-	if _skip_if_unsupported():
+	if _skip_without_cryptor_key_index():
 		return
 	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
 	var video := _publish_red_video()
@@ -75,7 +75,7 @@ func test_rotated_key_is_used_once_switched_to():
 
 
 func test_data_sent_right_after_switching_keys_uses_the_new_key():
-	if _skip_if_unsupported():
+	if _skip_without_cryptor_key_index():
 		return
 	# Room2 can only decrypt the key room1 switches to.
 	var next_key := "next key".to_utf8_buffer()
@@ -98,7 +98,7 @@ func test_data_sent_right_after_switching_keys_uses_the_new_key():
 
 
 func test_data_sent_just_before_switching_keys_is_delivered():
-	if _skip_if_unsupported():
+	if _skip_without_cryptor_key_index():
 		return
 	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
 	var next_key := "next key".to_utf8_buffer()
@@ -120,7 +120,7 @@ func test_data_sent_just_before_switching_keys_is_delivered():
 
 
 func test_key_changes_requested_together_each_take_effect():
-	if _skip_if_unsupported():
+	if _skip_without_cryptor_key_index():
 		return
 	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
 	# Frame cryptors (which switch keys) only exist for tracks.
@@ -155,7 +155,7 @@ func _await_key_change(key_provider: LiveKitKeyProvider, key_index: int, old_key
 
 
 func test_receiver_follows_a_ratcheted_key():
-	if _skip_if_unsupported():
+	if _skip_if_no_server():
 		return
 	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
 	var video := _publish_red_video()
@@ -179,7 +179,7 @@ func test_receiver_follows_a_ratcheted_key():
 
 
 func test_receiver_records_a_participant_key_it_ratcheted():
-	if _skip_if_unsupported():
+	if _skip_if_no_server():
 		return
 	var no_shared_key := {"e2ee": LiveKitE2eeOptions.new()}
 	assert_true(await _connect_both_rooms(no_shared_key, {"e2ee": LiveKitE2eeOptions.new()}), "Both rooms should connect")
@@ -205,7 +205,7 @@ func test_receiver_records_a_participant_key_it_ratcheted():
 
 
 func test_encryption_turned_off_and_on_again_stays_on():
-	if _skip_if_unsupported():
+	if _skip_if_no_server():
 		return
 	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options("wrong key")), "Both rooms should connect")
 	var manager := _room.get_e2ee_manager()
@@ -226,7 +226,7 @@ func test_encryption_turned_off_and_on_again_stays_on():
 
 
 func test_video_flows_unencrypted_once_encryption_is_turned_off():
-	if _skip_if_unsupported():
+	if _skip_if_no_server():
 		return
 	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options("wrong key")), "Both rooms should connect")
 	var video := _publish_red_video()
@@ -235,6 +235,8 @@ func test_video_flows_unencrypted_once_encryption_is_turned_off():
 	assert_true(await _poll_until(_room, func(): return not local.get_track_publications().is_empty(), 10.0), "video published")
 
 	_room.get_e2ee_manager().set_enabled(false)
+	# Natively, a receiver keeps trying to decrypt until it turns encryption off too.
+	_room2.get_e2ee_manager().set_enabled(false)
 	# Room2 can only decode the video if it isn't encrypted.
 	var frames := await _count_red_frames(video, 5, 15.0)
 
@@ -243,7 +245,7 @@ func test_video_flows_unencrypted_once_encryption_is_turned_off():
 
 
 func test_data_sent_as_encryption_is_turned_back_on_is_delivered():
-	if _skip_if_unsupported():
+	if _skip_if_no_server():
 		return
 	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
 	var manager := _room.get_e2ee_manager()
@@ -270,7 +272,7 @@ func test_correct_participant_key_is_used_after_a_wrong_one_exceeds_the_failure_
 ## Asserts that room2 decodes room1's video once it's given the right key, after failing to with a
 ## wrong one.
 func _assert_recovers_from_wrong_key(shared: bool) -> void:
-	if _skip_if_unsupported():
+	if _skip_if_no_server():
 		return
 	var key := KEY.to_utf8_buffer()
 	var options := _intolerant_options(key if shared else PackedByteArray())
@@ -293,6 +295,17 @@ func _assert_recovers_from_wrong_key(shared: bool) -> void:
 	_close(video)
 
 
+func _skip_without_cryptor_key_index() -> bool:
+	if _skip_if_no_server():
+		return true
+	if not OS.has_feature("web"):
+		# client-sdk-cpp's FrameCryptor doesn't say which track it's for, which the FFI requires
+		# (livekit/client-sdk-cpp#311).
+		pending("Native LiveKitFrameCryptor.set_key_index() isn't supported with client-sdk-cpp 1.13.1")
+		return true
+	return false
+
+
 ## Options that drop a key after one decryption failure, with a shared key unless it's empty.
 func _intolerant_options(shared_key: PackedByteArray) -> Dictionary:
 	var options := LiveKitE2eeOptions.new()
@@ -301,16 +314,6 @@ func _intolerant_options(shared_key: PackedByteArray) -> Dictionary:
 	if not shared_key.is_empty():
 		options.shared_key = shared_key
 	return {"e2ee": options}
-
-
-func _skip_if_unsupported() -> bool:
-	if _skip_if_no_server():
-		return true
-	if not OS.has_feature("web"):
-		# client-sdk-cpp v0.3.1 builds its E2EEManager from a room handle that isn't set yet.
-		pending("Native E2EE crashes on connect with client-sdk-cpp v0.3.1")
-		return true
-	return false
 
 
 func _e2ee_options(key: String) -> Dictionary:
