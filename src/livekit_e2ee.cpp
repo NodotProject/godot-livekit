@@ -299,7 +299,7 @@ Ref<LiveKitKeyProvider> LiveKitE2eeManager::get_key_provider() {
         return Ref<LiveKitKeyProvider>();
     }
 
-    livekit::E2EEManager::KeyProvider *kp = e2ee_manager_->keyProvider();
+    livekit::E2EEManager::KeyProvider *kp = e2ee_manager_->keyProvider().lock().get();
     if (!kp) {
         return Ref<LiveKitKeyProvider>();
     }
