@@ -1,0 +1,273 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 00d4bd3..bf829a9 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -211,6 +211,15 @@ if(_lk_capture_features)
+   list(JOIN _lk_capture_features "," LIVEKIT_CARGO_FEATURES)
+   set(LIVEKIT_CAPTURE_ENABLED 1)
+ endif()
++# Android keeps its CA certificates where rustls-native-certs doesn't look, so use the bundled webpki roots there, as
++# LiveKit's own Android FFI builds do.
++set(LIVEKIT_CARGO_NO_DEFAULT_FEATURES OFF)
++if(ANDROID)
++  set(LIVEKIT_CARGO_NO_DEFAULT_FEATURES ON)
++  set(_lk_cargo_features ${_lk_capture_features} room-apis rustls-tls-webpki-roots)
++  list(SORT _lk_cargo_features)
++  list(JOIN _lk_cargo_features "," LIVEKIT_CARGO_FEATURES)
++endif()
+ message(STATUS "LIVEKIT_CAPTURE='${LIVEKIT_CAPTURE}' -> cargo features: '${LIVEKIT_CARGO_FEATURES}'")
+ 
+ set(GIT_COMMIT "unknown")
+@@ -261,14 +270,44 @@ configure_file(
+ 
+ find_program(CARGO_EXECUTABLE NAMES cargo REQUIRED)
+ 
+-# Determine Rust target triple for cross-compilation on macOS
++# Determine Rust target triple for cross-compilation on macOS and Android
+ set(RUST_TARGET_TRIPLE "")
++set(LIVEKIT_ANDROID_NDK "")
++set(LIVEKIT_ANDROID_CC "")
+ if(APPLE AND CMAKE_OSX_ARCHITECTURES)
+   if(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
+     set(RUST_TARGET_TRIPLE "x86_64-apple-darwin")
+   elseif(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+     set(RUST_TARGET_TRIPLE "aarch64-apple-darwin")
+   endif()
++elseif(ANDROID)
++  # The NDK names its clang wrappers after the target triple, which differs from Rust's for 32-bit ARM.
++  if(CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
++    set(RUST_TARGET_TRIPLE "aarch64-linux-android")
++    set(_lk_android_clang_triple "aarch64-linux-android")
++  elseif(CMAKE_ANDROID_ARCH_ABI STREQUAL "armeabi-v7a")
++    set(RUST_TARGET_TRIPLE "armv7-linux-androideabi")
++    set(_lk_android_clang_triple "armv7a-linux-androideabi")
++  elseif(CMAKE_ANDROID_ARCH_ABI STREQUAL "x86_64")
++    set(RUST_TARGET_TRIPLE "x86_64-linux-android")
++    set(_lk_android_clang_triple "x86_64-linux-android")
++  else()
++    message(FATAL_ERROR "Unsupported Android ABI: '${CMAKE_ANDROID_ARCH_ABI}'")
++  endif()
++  set(LIVEKIT_ANDROID_NDK "${CMAKE_ANDROID_NDK}")
++  # Cargo links the FFI itself, so it needs the NDK's compiler for the same ABI and API level as this build.
++  # The NDK's toolchain file sets ANDROID_PLATFORM_LEVEL; CMake's own Android support uses CMAKE_SYSTEM_VERSION.
++  if(DEFINED ANDROID_PLATFORM_LEVEL)
++    set(_lk_android_api "${ANDROID_PLATFORM_LEVEL}")
++  else()
++    set(_lk_android_api "${CMAKE_SYSTEM_VERSION}")
++  endif()
++  get_filename_component(_lk_android_toolchain_bin "${CMAKE_C_COMPILER}" DIRECTORY)
++  set(LIVEKIT_ANDROID_CC
++    "${_lk_android_toolchain_bin}/${_lk_android_clang_triple}${_lk_android_api}-clang")
++  if(NOT EXISTS "${LIVEKIT_ANDROID_CC}")
++    message(FATAL_ERROR "Android NDK compiler not found: ${LIVEKIT_ANDROID_CC}")
++  endif()
+ endif()
+ 
+ # Cargo artifacts cannot be shared between capture-enabled and disabled SDKs.
+@@ -293,7 +332,8 @@ endif()
+ # This is needed when using a non-system GCC (e.g. GCC 14) on an older distro whose
+ # system libstdc++ lacks symbols like __cxa_call_terminate.
+ set(GCC_LIB_DIR "")
+-if(NOT WIN32)
++# The NDK's compiler is clang, and the libraries beside it are for the build machine, not the target.
++if(NOT WIN32 AND NOT ANDROID)
+   get_filename_component(_gcc_bin_dir "${CMAKE_C_COMPILER}" DIRECTORY)
+   get_filename_component(_gcc_root "${_gcc_bin_dir}" DIRECTORY)
+   if(IS_DIRECTORY "${_gcc_root}/lib64")
+@@ -397,8 +437,12 @@ add_custom_command(
+           -DCARGO=${CARGO_EXECUTABLE}
+           -DPROTOC_PATH=${Protobuf_PROTOC_EXECUTABLE}
+           -DRUST_TARGET=${RUST_TARGET_TRIPLE}
++          -DANDROID_NDK=${LIVEKIT_ANDROID_NDK}
++          -DANDROID_CC=${LIVEKIT_ANDROID_CC}
++          -DANDROID_AR=${CMAKE_AR}
+           -DGCC_LIB_DIR=${GCC_LIB_DIR}
+           -DCARGO_FEATURES=${LIVEKIT_CARGO_FEATURES}
++          -DCARGO_NO_DEFAULT_FEATURES=${LIVEKIT_CARGO_NO_DEFAULT_FEATURES}
+           -DCARGO_TARGET_DIR=${LIVEKIT_CARGO_TARGET_DIR}
+           -P "${RUN_CARGO_SCRIPT}"
+   WORKING_DIRECTORY "${RUST_ROOT}"
+@@ -533,7 +577,7 @@ target_link_libraries(livekit
+ 
+ if(WIN32)
+   target_link_libraries(livekit PRIVATE winhttp)
+-else()
++elseif(NOT ANDROID)
+   find_package(CURL REQUIRED)
+   target_link_libraries(livekit PRIVATE CURL::libcurl)
+ endif()
+@@ -684,7 +728,7 @@ if(WIN32)
+   )
+ endif()
+ 
+-if(UNIX AND NOT APPLE)
++if(UNIX AND NOT APPLE AND NOT ANDROID)
+   find_package(OpenSSL REQUIRED)
+   target_link_libraries(livekit PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+ endif()
+diff --git a/cmake/protobuf.cmake b/cmake/protobuf.cmake
+index 3e0fa33..33cfa2a 100644
+--- a/cmake/protobuf.cmake
++++ b/cmake/protobuf.cmake
+@@ -149,7 +149,11 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "" FORCE)
+ set(protobuf_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+ set(protobuf_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+ set(protobuf_BUILD_CONFORMANCE OFF CACHE BOOL "" FORCE)
+-set(protobuf_BUILD_PROTOC_BINARIES ON CACHE BOOL "" FORCE)
++if(CMAKE_CROSSCOMPILING)
++  set(protobuf_BUILD_PROTOC_BINARIES OFF CACHE BOOL "" FORCE)
++else()
++  set(protobuf_BUILD_PROTOC_BINARIES ON CACHE BOOL "" FORCE)
++endif()
+ set(protobuf_WITH_ZLIB OFF CACHE BOOL "" FORCE)
+ 
+ set(protobuf_ABSL_PROVIDER "package" CACHE STRING "" FORCE)
+@@ -198,7 +202,21 @@ foreach(_livekit_protobuf_target IN LISTS _livekit_protobuf_targets)
+ endforeach()
+ 
+ # Protobuf targets: modern protobuf exports protobuf::protoc etc.
+-if(TARGET protobuf::protoc)
++if(CMAKE_CROSSCOMPILING)
++  # A protoc built for the target can't run during the build, so use one for the build machine. Its version must
++  # match the vendored runtime, which only accepts code generated by the same release.
++  find_program(Protobuf_PROTOC_EXECUTABLE NAMES protoc REQUIRED)
++  execute_process(
++    COMMAND "${Protobuf_PROTOC_EXECUTABLE}" --version
++    OUTPUT_VARIABLE _livekit_host_protoc_version
++    OUTPUT_STRIP_TRAILING_WHITESPACE
++  )
++  if(NOT _livekit_host_protoc_version STREQUAL "libprotoc ${LIVEKIT_PROTOBUF_VERSION}")
++    message(FATAL_ERROR
++      "Cross-compiling needs protoc ${LIVEKIT_PROTOBUF_VERSION} for the build machine, but "
++      "${Protobuf_PROTOC_EXECUTABLE} is '${_livekit_host_protoc_version}'. Set Protobuf_PROTOC_EXECUTABLE.")
++  endif()
++elseif(TARGET protobuf::protoc)
+   set(Protobuf_PROTOC_EXECUTABLE "$<TARGET_FILE:protobuf::protoc>" CACHE STRING "protoc (vendored)" FORCE)
+ elseif(TARGET protoc)
+   set(Protobuf_PROTOC_EXECUTABLE "$<TARGET_FILE:protoc>" CACHE STRING "protoc (vendored)" FORCE)
+diff --git a/cmake/run_cargo.cmake b/cmake/run_cargo.cmake
+index 06be61f..69bdf61 100644
+--- a/cmake/run_cargo.cmake
++++ b/cmake/run_cargo.cmake
+@@ -27,6 +27,10 @@ if(NOT CFG STREQUAL "Debug")
+   list(APPEND ARGS --release)
+ endif()
+ 
++if(CARGO_NO_DEFAULT_FEATURES)
++  list(APPEND ARGS --no-default-features)
++endif()
++
+ if(DEFINED CARGO_FEATURES AND NOT CARGO_FEATURES STREQUAL "")
+   list(APPEND ARGS --features "${CARGO_FEATURES}")
+   message(STATUS "[run_cargo.cmake] Cargo features: ${CARGO_FEATURES}")
+@@ -49,6 +53,22 @@ if(DEFINED GCC_LIB_DIR AND NOT GCC_LIB_DIR STREQUAL "")
+   set(ENV{LD_LIBRARY_PATH} "${GCC_LIB_DIR}:$ENV{LD_LIBRARY_PATH}")
+ endif()
+ 
++# Point cargo, the cc crate and bindgen at the NDK's toolchain for the target, as cargo-ndk does. webrtc-sys
++# finds the NDK through ANDROID_NDK_HOME.
++if(DEFINED ANDROID_NDK AND NOT ANDROID_NDK STREQUAL "")
++  string(REPLACE "-" "_" _target_env "${RUST_TARGET}")
++  string(TOUPPER "${_target_env}" _target_env_upper)
++  get_filename_component(_toolchain_bin "${ANDROID_CC}" DIRECTORY)
++  get_filename_component(_toolchain_root "${_toolchain_bin}" DIRECTORY)
++  set(ENV{ANDROID_NDK_HOME} "${ANDROID_NDK}")
++  set(ENV{CC_${_target_env}} "${ANDROID_CC}")
++  set(ENV{CXX_${_target_env}} "${ANDROID_CC}++")
++  set(ENV{AR_${_target_env}} "${ANDROID_AR}")
++  set(ENV{CARGO_TARGET_${_target_env_upper}_LINKER} "${ANDROID_CC}")
++  set(ENV{BINDGEN_EXTRA_CLANG_ARGS_${_target_env}} "--sysroot=${_toolchain_root}/sysroot")
++  message(STATUS "[run_cargo.cmake] Android NDK=${ANDROID_NDK}  CC=${ANDROID_CC}")
++endif()
++
+ execute_process(
+   COMMAND "${CARGO}" ${ARGS}
+   WORKING_DIRECTORY "${RUST_ROOT}"
+diff --git a/cmake/uniffi_cpp.cmake b/cmake/uniffi_cpp.cmake
+index f5d5f1a..0edc902 100644
+--- a/cmake/uniffi_cpp.cmake
++++ b/cmake/uniffi_cpp.cmake
+@@ -27,8 +27,14 @@ set(LIVEKIT_UNIFFI_CPP_SCAFFOLDING_HEADER
+ if(UNIX AND NOT APPLE)
+   set(LIVEKIT_UNIFFI_METADATA_TARGET_DIR
+       "${LIVEKIT_CARGO_TARGET_DIR}/uniffi-cpp-metadata")
+-  set(LIVEKIT_UNIFFI_METADATA_LIBRARY
+-      "${LIVEKIT_UNIFFI_METADATA_TARGET_DIR}/debug/liblivekit_ffi.so")
++  # Android builds it for the target too, so cross-compiling doesn't also need a native toolchain for the host.
++  if(RUST_TARGET_TRIPLE)
++    set(LIVEKIT_UNIFFI_METADATA_LIBRARY
++        "${LIVEKIT_UNIFFI_METADATA_TARGET_DIR}/${RUST_TARGET_TRIPLE}/debug/liblivekit_ffi.so")
++  else()
++    set(LIVEKIT_UNIFFI_METADATA_LIBRARY
++        "${LIVEKIT_UNIFFI_METADATA_TARGET_DIR}/debug/liblivekit_ffi.so")
++  endif()
+ endif()
+ 
+ file(GLOB_RECURSE LIVEKIT_UNIFFI_BINDGEN_SOURCES CONFIGURE_DEPENDS
+@@ -44,9 +50,14 @@ if(UNIX AND NOT APPLE)
+             -DRUST_ROOT=${RUST_ROOT}
+             -DCARGO=${CARGO_EXECUTABLE}
+             -DPROTOC_PATH=${Protobuf_PROTOC_EXECUTABLE}
++            -DRUST_TARGET=${RUST_TARGET_TRIPLE}
++            -DANDROID_NDK=${LIVEKIT_ANDROID_NDK}
++            -DANDROID_CC=${LIVEKIT_ANDROID_CC}
++            -DANDROID_AR=${CMAKE_AR}
+             -DGCC_LIB_DIR=${GCC_LIB_DIR}
+             -DCARGO_TARGET_DIR=${LIVEKIT_UNIFFI_METADATA_TARGET_DIR}
+             -DCARGO_FEATURES=${LIVEKIT_CARGO_FEATURES}
++            -DCARGO_NO_DEFAULT_FEATURES=${LIVEKIT_CARGO_NO_DEFAULT_FEATURES}
+             -P "${RUN_CARGO_SCRIPT}"
+     WORKING_DIRECTORY "${RUST_ROOT}"
+     DEPENDS ${RUST_SOURCES} "${RUN_CARGO_SCRIPT}"
+diff --git a/src/token_source_http.cpp b/src/token_source_http.cpp
+index 470e85d..99254be 100644
+--- a/src/token_source_http.cpp
++++ b/src/token_source_http.cpp
+@@ -27,14 +27,14 @@
+ #endif
+ #include <windows.h>
+ #include <winhttp.h>
+-#else
++#elif !defined(__ANDROID__)
+ #include <curl/curl.h>
+ #endif
+ 
+ namespace livekit {
+ namespace {
+ 
+-#if !defined(_WIN32)
++#if !defined(_WIN32) && !defined(__ANDROID__)
+ size_t curlWriteCallback(char* contents, size_t size, size_t nmemb, void* user_data) {
+   const size_t total_size = size * nmemb;
+   auto* response = static_cast<std::string*>(user_data);
+@@ -43,6 +43,7 @@ size_t curlWriteCallback(char* contents, size_t size, size_t nmemb, void* user_d
+ }
+ #endif
+ 
++#if !defined(__ANDROID__)
+ std::string normalizeHttpMethod(std::string method) {
+   if (method.empty()) {
+     return "POST";
+@@ -61,6 +62,7 @@ std::int64_t effectiveTimeoutMs(std::chrono::milliseconds timeout) {
+   const std::int64_t count = timeout.count();
+   return count > 0 ? count : kDefaultTimeoutMs;
+ }
++#endif
+ 
+ #if defined(_WIN32)
+ std::wstring toWide(const std::string& value) {
+@@ -198,6 +200,14 @@ Result<std::string, std::string> tokenSourceHttpRequest(const std::string& metho
+                                                         std::chrono::milliseconds timeout) {
+ #if defined(_WIN32)
+   return winHttpRequest(method, url, headers, json_body, timeout);
++#elif defined(__ANDROID__)
++  // Android has no system libcurl, and bundling one would mean bundling a TLS library too.
++  static_cast<void>(method);
++  static_cast<void>(url);
++  static_cast<void>(headers);
++  static_cast<void>(json_body);
++  static_cast<void>(timeout);
++  return Result<std::string, std::string>::failure("HTTP token sources aren't supported on Android");
+ #else
+   CURL* curl = curl_easy_init();
+   if (curl == nullptr) {

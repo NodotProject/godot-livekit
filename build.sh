@@ -16,14 +16,20 @@ PLATFORM=""
 ARCH=""
 SCONS_FLAGS=""
 LIVEKIT_VERSION="1.13.1"
-# LiveKit publishes no Android build of the C++ SDK; Android still uses the fork.
-LIVEKIT_ANDROID_VERSION="0.3.1"
+# LiveKit publishes no Android build of the C++ SDK, so Android builds it from the same release with this patch.
+LIVEKIT_ANDROID_PATCH="patches/client-sdk-cpp-android.patch"
+# Cross-compiling the SDK needs a protoc for the build machine that matches its vendored protobuf.
+PROTOC_VERSION="25.3"
+PROTOC_SHA256="f853e691868d0557425ea290bf7ba6384eef2fa9b04c323afab49a770ba9da80"
+# webrtc-sys needs NDK r27's libc++.
+MIN_ANDROID_NDK_MAJOR=27
 GODOT_CPP_VERSION="godot-4.5-stable"
 FRAMETAP_VERSION="0.1.3"
 LIVEKIT_JS_VERSION="2.22.3"
 LIVEKIT_JS_SHA256="0f920230001fcbfdccb0bcd2efffd64da8594808908953ed466d4c39c1529fa3"
 SKIP_FRAMETAP=false
 SKIP_LIVEKIT_SDK=false
+BUILD_LIVEKIT_SDK=false
 
 # Verify a downloaded file's SHA-256 hash (if a hash is provided).
 verify_checksum() {
@@ -108,9 +114,7 @@ setup_android() {
     PLATFORM="android"
     ARCH="arm64"
     SCONS_FLAGS="platform=android arch=arm64 screen_capture=no"
-    LIVEKIT_VERSION="$LIVEKIT_ANDROID_VERSION"
-    LIVEKIT_ARCHIVE="livekit-sdk-android-arm64-${LIVEKIT_VERSION}.tar.gz"
-    LIVEKIT_URL="https://github.com/krazyjakee/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
+    BUILD_LIVEKIT_SDK=true
     SKIP_FRAMETAP=true
     echo -e "${BLUE}=== Godot-LiveKit Local Build Script (Android arm64) ===${NC}"
 }
@@ -221,10 +225,45 @@ fetch_livekit() {
         fi
     fi
 
-    local version_key="$LIVEKIT_VERSION"
-    [ "$PLATFORM" == "macos" ] && version_key="${LIVEKIT_VERSION}-${ARCH}"
-    echo "$version_key" > livekit-sdk/.version
+    livekit_version_key > livekit-sdk/.version
     echo -e "${GREEN}LiveKit SDK downloaded and extracted successfully!${NC}"
+}
+
+# Function to build the LiveKit C++ SDK for Android from its release, with our Android patch
+build_livekit_android() {
+    echo -e "${YELLOW}Building LiveKit C++ SDK ${LIVEKIT_VERSION} for Android (${ARCH})...${NC}"
+    local ndk_root="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
+    local work_dir="$(pwd)/livekit-sdk-build"
+    local src_dir="${work_dir}/client-sdk-cpp"
+
+    rm -rf livekit-sdk "$work_dir"
+    mkdir -p "$work_dir"
+    git clone --quiet --depth 1 --branch "v${LIVEKIT_VERSION}" --recurse-submodules --shallow-submodules \
+        https://github.com/livekit/client-sdk-cpp.git "$src_dir"
+    git -C "$src_dir" apply "$(pwd)/${LIVEKIT_ANDROID_PATCH}"
+
+    local protoc_zip="${work_dir}/protoc.zip"
+    curl -sL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" \
+        -o "$protoc_zip"
+    verify_checksum "$protoc_zip" "$PROTOC_SHA256"
+    unzip -q "$protoc_zip" -d "${work_dir}/protoc"
+
+    # The SDK pins its Rust release in client-sdk-rust, so add the target to that toolchain.
+    (cd "${src_dir}/client-sdk-rust" && rustup target add aarch64-linux-android)
+
+    cmake -S "$src_dir" -B "${work_dir}/build" -G Ninja \
+        -DCMAKE_TOOLCHAIN_FILE="${ndk_root}/build/cmake/android.toolchain.cmake" \
+        -DANDROID_ABI=arm64-v8a \
+        -DANDROID_PLATFORM=android-24 \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLIVEKIT_VERSION="$LIVEKIT_VERSION" \
+        -DProtobuf_PROTOC_EXECUTABLE="${work_dir}/protoc/bin/protoc"
+    cmake --build "${work_dir}/build" -j "$(nproc)"
+    cmake --install "${work_dir}/build" --prefix "$(pwd)/livekit-sdk"
+
+    livekit_version_key > livekit-sdk/.version
+    rm -rf "$work_dir"
+    echo -e "${GREEN}LiveKit SDK built successfully!${NC}"
 }
 
 # Function to download livekit-client, which the web build embeds
@@ -310,9 +349,7 @@ check_livekit_cache() {
         return 1
     fi
 
-    local version_key="$LIVEKIT_VERSION"
-    [ "$PLATFORM" == "macos" ] && version_key="${LIVEKIT_VERSION}-${ARCH}"
-    if [ -f "livekit-sdk/.version" ] && [ "$(cat livekit-sdk/.version)" = "$version_key" ]; then
+    if [ -f "livekit-sdk/.version" ] && [ "$(cat livekit-sdk/.version)" = "$(livekit_version_key)" ]; then
         echo -e "${GREEN}livekit SDK cache is valid!${NC}"
         return 0
     fi
@@ -401,8 +438,15 @@ install_dependencies() {
             echo -e "${RED}ANDROID_NDK_ROOT or ANDROID_NDK_HOME must be set and point to a valid NDK installation${NC}"
             exit 1
         fi
+        local ndk_major
+        ndk_major=$(sed -n 's/^Pkg.Revision *= *\([0-9]*\).*/\1/p' "${ndk_root}/source.properties" 2>/dev/null)
+        if [ -z "$ndk_major" ] || [ "$ndk_major" -lt "$MIN_ANDROID_NDK_MAJOR" ]; then
+            echo -e "${RED}Android builds need NDK r${MIN_ANDROID_NDK_MAJOR} or newer, but ${ndk_root} is ${ndk_major:-unknown}${NC}"
+            exit 1
+        fi
 
-        local required_tools=("scons" "curl" "tar")
+        # Building the LiveKit SDK also needs git, CMake, Ninja and Rust (rustup).
+        local required_tools=("scons" "curl" "tar" "unzip" "git" "cmake" "ninja" "rustup" "cargo")
         local missing_tools=()
 
         for tool in "${required_tools[@]}"; do
@@ -453,6 +497,18 @@ build_main_project() {
                 install_name_tool -change "$bad_path" "@rpath/liblivekit_ffi.dylib" "$dylib"
             done
         done
+    fi
+}
+
+# Prints the key that identifies the LiveKit SDK build in livekit-sdk/.version.
+livekit_version_key() {
+    if [ "$PLATFORM" == "macos" ]; then
+        echo "${LIVEKIT_VERSION}-${ARCH}"
+    elif [ "$BUILD_LIVEKIT_SDK" = true ]; then
+        # A changed patch needs a rebuild.
+        echo "${LIVEKIT_VERSION}-$(sha256sum "$LIVEKIT_ANDROID_PATCH" | cut -c1-12)"
+    else
+        echo "$LIVEKIT_VERSION"
     fi
 }
 
@@ -519,10 +575,12 @@ main() {
 
     if [ "$SKIP_LIVEKIT_SDK" = true ]; then
         fetch_livekit_js
-    elif ! check_livekit_cache; then
-        fetch_livekit
-    else
+    elif check_livekit_cache; then
         echo -e "${GREEN}Using cached livekit SDK${NC}"
+    elif [ "$BUILD_LIVEKIT_SDK" = true ]; then
+        build_livekit_android
+    else
+        fetch_livekit
     fi
 
     if ! check_godotcpp_cache; then

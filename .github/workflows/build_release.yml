@@ -68,7 +68,11 @@ jobs:
         id: setup-ndk
         uses: nttld/setup-ndk@v1
         with:
-          ndk-version: r26d
+          ndk-version: r27d
+
+      - name: Install Android SDK build dependencies
+        if: matrix.platform == 'android'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
 
       - name: Set up Emscripten
         if: matrix.platform == 'web'
@@ -86,7 +90,8 @@ jobs:
         with:
           path: |
             godot-cpp
-          key: deps-${{ matrix.platform }}-${{ matrix.arch || matrix.platform }}-${{ hashFiles('build.sh') }}
+            livekit-sdk
+          key: deps-${{ matrix.platform }}-${{ matrix.arch || matrix.platform }}-${{ hashFiles('build.sh', 'patches/**') }}
 
       - name: Build GDExtension
         shell: bash
