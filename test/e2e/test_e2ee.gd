@@ -178,6 +178,25 @@ func test_receiver_follows_a_ratcheted_key():
 	_close(video)
 
 
+func test_data_only_receiver_follows_a_ratcheted_key():
+	if _skip_if_unsupported():
+		return
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
+	var received := []
+	_room2.data_received.connect(func(data, _participant, _kind, _topic): received.append(data.get_string_from_utf8()))
+	_room.get_local_participant().publish_data("before".to_utf8_buffer(), true)
+	await _poll_both(func(): return received.size() >= 1, 5.0)
+
+	# Without media, room2 can only ratchet its key when the data doesn't decrypt.
+	var key_provider := _room.get_e2ee_manager().get_key_provider()
+	key_provider.ratchet_shared_key()
+	var new_key := await _await_key_change(key_provider, 0, KEY.to_utf8_buffer())
+	_room.get_local_participant().publish_data("after".to_utf8_buffer(), true)
+	await _poll_both(func(): return received.size() >= 2, 5.0)
+
+	assert_eq([new_key != KEY.to_utf8_buffer(), received], [true, ["before", "after"]])
+
+
 func test_receiver_records_a_participant_key_it_ratcheted():
 	if _skip_if_unsupported():
 		return
