@@ -19,9 +19,7 @@ void LiveKitAudioStream::_bind_methods() {
     ADD_PROPERTY(PropertyInfo(Variant::INT, "num_channels"), "", "get_num_channels");
 }
 
-LiveKitAudioStream::LiveKitAudioStream() {
-    ring_.resize(kMaxAudioBufferSamples, 0.0f);
-}
+LiveKitAudioStream::LiveKitAudioStream() {}
 
 LiveKitAudioStream::~LiveKitAudioStream() {
     alive_->store(false);
@@ -94,6 +92,8 @@ Ref<LiveKitAudioStream> LiveKitAudioStream::from_track(const Ref<LiveKitTrack> &
     Ref<LiveKitAudioStream> stream;
     stream.instantiate();
     stream->stream_ = native_stream;
+    // Allocated here rather than in the constructor, since only streams that read need it.
+    stream->ring_.resize(kMaxAudioBufferSamples, 0.0f);
     stream->running_.store(true);
     // Capture the alive sentinel so the thread can detect if the object is freed.
     auto alive = stream->alive_;
@@ -125,6 +125,8 @@ Ref<LiveKitAudioStream> LiveKitAudioStream::from_participant(const Ref<LiveKitRe
     Ref<LiveKitAudioStream> stream;
     stream.instantiate();
     stream->stream_ = native_stream;
+    // Allocated here rather than in the constructor, since only streams that read need it.
+    stream->ring_.resize(kMaxAudioBufferSamples, 0.0f);
     stream->running_.store(true);
     auto alive = stream->alive_;
     stream->reader_thread_.start([raw = stream.ptr(), alive]() {

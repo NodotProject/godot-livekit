@@ -27,7 +27,7 @@ private:
     std::shared_ptr<livekit::AudioStream> stream_;
     std::mutex audio_mutex_;
 
-    // Ring buffer: pre-allocated, O(1) write, no memmove on overflow.
+    // Ring buffer: allocated once when reading starts, O(1) write, no memmove on overflow.
     static constexpr size_t kMaxAudioBufferSamples = 48000 * 2 * 5; // ~5 seconds stereo at 48kHz
     std::vector<float> ring_;
     size_t ring_head_{0}; // read position
