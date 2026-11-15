@@ -251,10 +251,13 @@ build_livekit_android() {
     # The SDK pins its Rust release in client-sdk-rust, so add the target to that toolchain.
     (cd "${src_dir}/client-sdk-rust" && rustup target add aarch64-linux-android)
 
+    # The SDK reports errors by throwing, and the extension can only catch them if both share one C++ runtime.
+    # With the NDK's default static runtime, each library gets its own exception types, and the app aborts instead.
     cmake -S "$src_dir" -B "${work_dir}/build" -G Ninja \
         -DCMAKE_TOOLCHAIN_FILE="${ndk_root}/build/cmake/android.toolchain.cmake" \
         -DANDROID_ABI=arm64-v8a \
         -DANDROID_PLATFORM=android-24 \
+        -DANDROID_STL=c++_shared \
         -DCMAKE_BUILD_TYPE=Release \
         -DLIVEKIT_VERSION="$LIVEKIT_VERSION" \
         -DProtobuf_PROTOC_EXECUTABLE="${work_dir}/protoc/bin/protoc"
