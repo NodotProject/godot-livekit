@@ -20,7 +20,10 @@ LIVEKIT_VERSION="1.13.1"
 LIVEKIT_ANDROID_PATCH="patches/client-sdk-cpp-android.patch"
 # Cross-compiling the SDK needs a protoc for the build machine that matches its vendored protobuf.
 PROTOC_VERSION="25.3"
-PROTOC_SHA256="f853e691868d0557425ea290bf7ba6384eef2fa9b04c323afab49a770ba9da80"
+# protoc runs on the build machine, so there's one download per host.
+PROTOC_SHA256_LINUX_X86_64="f853e691868d0557425ea290bf7ba6384eef2fa9b04c323afab49a770ba9da80"
+PROTOC_SHA256_LINUX_AARCH64="9eae1f20f70cccc912d1c318c3929b86aebf5afd4b0f32c196ef682c222ed5ae"
+PROTOC_SHA256_MACOS="c06b6c5527c9b11a30a9c103400ee59eb6882f1766ea786fe4bdbb7f55ee5e6f"
 # webrtc-sys needs NDK r27's libc++.
 MIN_ANDROID_NDK_MAJOR=27
 GODOT_CPP_VERSION="godot-4.5-stable"
@@ -254,10 +257,20 @@ build_livekit_android() {
         https://github.com/livekit/client-sdk-cpp.git "$src_dir"
     git -C "$src_dir" apply "$(pwd)/${LIVEKIT_ANDROID_PATCH}"
 
+    local protoc_host protoc_sha256
+    case "$(uname -s)-$(uname -m)" in
+        Linux-x86_64) protoc_host="linux-x86_64"; protoc_sha256="$PROTOC_SHA256_LINUX_X86_64" ;;
+        Linux-aarch64 | Linux-arm64) protoc_host="linux-aarch_64"; protoc_sha256="$PROTOC_SHA256_LINUX_AARCH64" ;;
+        Darwin-*) protoc_host="osx-universal_binary"; protoc_sha256="$PROTOC_SHA256_MACOS" ;;
+        *)
+            echo -e "${RED}Building the LiveKit SDK for Android isn't supported on $(uname -s) $(uname -m)${NC}"
+            exit 1
+            ;;
+    esac
     local protoc_zip="${work_dir}/protoc.zip"
-    curl -sL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" \
+    curl -sL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${protoc_host}.zip" \
         -o "$protoc_zip"
-    verify_checksum "$protoc_zip" "$PROTOC_SHA256"
+    verify_checksum "$protoc_zip" "$protoc_sha256"
     unzip -q "$protoc_zip" -d "${work_dir}/protoc"
 
     # The SDK pins its Rust release in client-sdk-rust, so add the target to that toolchain.
@@ -273,11 +286,12 @@ build_livekit_android() {
         -DCMAKE_BUILD_TYPE=Release \
         -DLIVEKIT_VERSION="$LIVEKIT_VERSION" \
         -DProtobuf_PROTOC_EXECUTABLE="${work_dir}/protoc/bin/protoc"
-    cmake --build "${work_dir}/build" -j "$(nproc)"
+    cmake --build "${work_dir}/build" -j "$(getconf _NPROCESSORS_ONLN)"
     cmake --install "${work_dir}/build" --prefix "$(pwd)/livekit-sdk"
     # Apps also need WebRTC's Java classes, which come with the WebRTC build that the SDK's build downloads.
     local webrtc_jar
-    webrtc_jar=$(find "${src_dir}/client-sdk-rust/target" -path "*/out/livekit_webrtc/*" -name libwebrtc.jar | head -1)
+    # The SDK's build puts Cargo's output in CARGO_TARGET_DIR when it's set, relative to client-sdk-rust.
+    webrtc_jar=$(cd "${src_dir}/client-sdk-rust" && find "$(cd "${CARGO_TARGET_DIR:-target}" && pwd)" -path "*/out/livekit_webrtc/*" -name libwebrtc.jar | head -1)
     if [ -z "$webrtc_jar" ]; then
         echo -e "${RED}libwebrtc.jar not found in the LiveKit SDK build${NC}"
         exit 1
@@ -530,7 +544,7 @@ livekit_version_key() {
         echo "${LIVEKIT_VERSION}-${ARCH}"
     elif [ "$BUILD_LIVEKIT_SDK" = true ]; then
         # A changed patch needs a rebuild.
-        echo "${LIVEKIT_VERSION}-${ARCH}-$(sha256sum "$LIVEKIT_ANDROID_PATCH" | cut -c1-12)"
+        echo "${LIVEKIT_VERSION}-${ARCH}-$(git hash-object "$LIVEKIT_ANDROID_PATCH" | cut -c1-12)"
     else
         echo "$LIVEKIT_VERSION"
     fi

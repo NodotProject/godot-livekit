@@ -131,11 +131,17 @@ export_apk() {
     # Exporting with Gradle needs Godot's Android build template in the project. The plugin doesn't add
     # WebRTC's Java classes to exports yet, so the test build adds them to the template.
     if [ "$(cat android/.build_version 2>/dev/null)" != "$godot_version" ]; then
+        # A template this script didn't install may have the project's own changes, so leave it alone.
+        if [ -d android ] && [ ! -f android/.livekit_test_template ]; then
+            echo -e "${RED}android/ has an Android build template this script didn't install. Move it aside to run the tests.${NC}"
+            exit 1
+        fi
         echo -e "${YELLOW}Installing Godot's Android build template...${NC}"
         rm -rf android
         mkdir -p android/build
         unzip -q "$templates_dir/android_source.zip" -d android/build
         echo "$godot_version" > android/.build_version
+        touch android/.livekit_test_template
         touch android/build/.gdignore
     fi
     mkdir -p android/build/libs/debug
@@ -231,10 +237,14 @@ STARTED_APP=true
 # Emulators can drop off adb for a moment, so a failed adb command doesn't mean the app has stopped.
 # Only adb answering that the process is gone does.
 deadline=$((SECONDS + TIMEOUT_SEC))
+app_exited=false
 while [ $SECONDS -lt $deadline ]; do
     sleep 5
     running=$("$ADB" shell "pidof $PACKAGE >/dev/null && echo yes || echo no" 2>/dev/null | tr -d '\r' || true)
-    [ "$running" = "no" ] && break
+    if [ "$running" = "no" ]; then
+        app_exited=true
+        break
+    fi
 done
 
 # The app writes Godot's log to a file (see extra_args), which survives adb dropping out.
@@ -251,6 +261,11 @@ fi
 
 if [ -z "$result" ]; then
     echo -e "${RED}Android tests did not finish (the app stopped early or took over ${TIMEOUT_SEC}s).${NC}"
+    exit 1
+fi
+# The runner reports before quitting, so a hang while shutting down would otherwise go unnoticed.
+if [ "$app_exited" != true ]; then
+    echo -e "${RED}The app didn't exit within ${TIMEOUT_SEC}s after running the tests.${NC}"
     exit 1
 fi
 failing=$(echo "$result" | sed -E 's/.*failing=([0-9]+).*/\1/')

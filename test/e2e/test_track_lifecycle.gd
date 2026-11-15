@@ -125,7 +125,8 @@ func test_track_published_without_keeping_it_stays_published():
 
 	_publish_unkept_audio_track(lp)
 
-	await _poll_until(_room, func(): return not published_sids.is_empty(), 10.0)
+	assert_true(await _poll_until(_room, func(): return not published_sids.is_empty(), 10.0),
+			"Room should publish the track")
 	# Natively, the SDK forgets a track's publication once the track is freed (but leaves it
 	# published), so give it a moment to be freed.
 	await _poll_both(func(): return false, 2.0)
