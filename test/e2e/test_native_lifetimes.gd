@@ -3,7 +3,7 @@ extends "res://test/e2e/e2e_helper.gd"
 ## the web build, where participants outlive their connection.)
 
 
-func test_remote_participant_kept_after_it_leaves_is_unbound():
+func test_remote_participant_kept_after_it_leaves_is_unbound_but_keeps_its_identity():
 	if _skip_on_web():
 		return
 	assert_true(await _connect_both_rooms(), "Both rooms should connect")
@@ -15,10 +15,10 @@ func test_remote_participant_kept_after_it_leaves_is_unbound():
 	await _poll_until(_room, func(): return false, 1.0)
 
 	var p: LiveKitRemoteParticipant = departed[0]
-	assert_eq([p.get_identity(), p.get_attributes(), p.get_track_publications()], ["", {}, {}])
+	assert_eq([p.get_identity(), p.get_attributes(), p.get_track_publications()], ["e2e-user-2", {}, {}])
 
 
-func test_local_participant_kept_after_disconnecting_is_unbound():
+func test_local_participant_kept_after_disconnecting_is_unbound_but_keeps_its_identity():
 	if _skip_on_web():
 		return
 	assert_true(await _connect_both_rooms(), "Both rooms should connect")
@@ -33,7 +33,7 @@ func test_local_participant_kept_after_disconnecting_is_unbound():
 
 	assert_eq(
 		[local.get_identity(), local.get_attributes(), local.get_track_publications(), _take_errors()],
-		["", {}, {}, ["LiveKitLocalParticipant::publish_data: not bound"]],
+		["e2e-user-1", {}, {}, ["LiveKitLocalParticipant::publish_data: not bound"]],
 	)
 
 

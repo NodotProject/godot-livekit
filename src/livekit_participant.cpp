@@ -41,8 +41,9 @@ LiveKitParticipant::LiveKitParticipant() {
 LiveKitParticipant::~LiveKitParticipant() {
 }
 
-void LiveKitParticipant::bind_participant(const std::weak_ptr<livekit::Participant> &p_participant) {
+void LiveKitParticipant::bind_participant(const std::weak_ptr<livekit::Participant> &p_participant, const std::string &p_identity) {
     participant_ = p_participant;
+    identity_ = p_identity;
 }
 
 String LiveKitParticipant::get_sid() const {
@@ -60,10 +61,7 @@ String LiveKitParticipant::get_name() const {
 }
 
 String LiveKitParticipant::get_identity() const {
-    if (auto participant = participant_.lock()) {
-        return String(participant->identity().c_str());
-    }
-    return String();
+    return String(identity_.c_str());
 }
 
 String LiveKitParticipant::get_metadata() const {

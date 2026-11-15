@@ -38,12 +38,15 @@ protected:
     static void _bind_methods();
     // Weak, since the room owns its participants and frees them once they disconnect.
     std::weak_ptr<livekit::Participant> participant_;
+    // Kept, since it never changes, and handlers for a participant leaving (e.g. participant_disconnected)
+    // often run after the SDK has freed it, but still need to know who left.
+    std::string identity_;
 
 public:
     LiveKitParticipant();
     ~LiveKitParticipant();
 
-    void bind_participant(const std::weak_ptr<livekit::Participant> &p_participant);
+    void bind_participant(const std::weak_ptr<livekit::Participant> &p_participant, const std::string &p_identity);
 
     String get_sid() const;
     String get_name() const;

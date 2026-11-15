@@ -306,15 +306,19 @@ void LiveKitRoom::_finalize_connection(bool success) {
         // Initialize local participant
         if (auto lp = room->localParticipant().lock()) {
             local_participant.instantiate();
-            local_participant->bind_participant(lp);
+            local_participant->bind_participant(lp, lp->identity());
         }
 
         // Initialize remote participants
         auto remotes = room->remoteParticipants();
         for (auto const &r : remotes) {
+            auto remote = r.lock();
+            if (!remote) {
+                continue;
+            }
             Ref<LiveKitRemoteParticipant> p;
             p.instantiate();
-            p->bind_participant(r);
+            p->bind_participant(r, remote->identity());
             std::lock_guard<std::mutex> plock(participants_mutex_);
             remote_participants[p->get_identity()] = p;
         }
@@ -523,7 +527,7 @@ void LiveKitRoom::GodotRoomDelegate::onParticipantConnected(livekit::Room &r, co
     room->pending_events_.push_back([this, identity, rp]() {
         Ref<LiveKitRemoteParticipant> p;
         p.instantiate();
-        p->bind_participant(rp);
+        p->bind_participant(rp, identity);
         {
             std::lock_guard<std::mutex> plock(room->participants_mutex_);
             room->remote_participants[String(identity.c_str())] = p;
