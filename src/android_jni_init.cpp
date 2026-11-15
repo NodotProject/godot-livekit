@@ -156,7 +156,11 @@ void livekit_android_jni_init() {
     // registration), then this library (AV1 stubs). Both calls are idempotent
     // for already-Java-loaded libraries.
     bool ok = java_load_library(env, "livekit_ffi");
+#if defined(__x86_64__)
+    ok = java_load_library(env, "godot-livekit.android.x86_64") && ok;
+#else
     ok = java_load_library(env, "godot-livekit.android.arm64") && ok;
+#endif
     jni_initialized = ok;
 }
 
