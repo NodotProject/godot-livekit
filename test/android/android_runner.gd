@@ -2,14 +2,15 @@ extends Node
 ## Runs GUT inside an Android export, where tests can't be passed on a command line. test_android.sh
 ## bakes the tests to run, and env vars read by the test helpers, into the export as user arguments
 ## (`tests=res://test/unit/test_room.gd,... RUN_E2E=1 ...`).
-## Prints `GUT_ANDROID_RESULT tests=N failing=N pending=N` when done, for test_android.sh to parse,
-## and quits.
+## Prints `GUT_ANDROID_STARTED` once it's running and `GUT_ANDROID_RESULT tests=N failing=N pending=N`
+## when done, for test_android.sh to parse, and quits.
 
 const GutConfig := preload("res://addons/gut/gut_config.gd")
 const GutRunner := preload("res://addons/gut/gui/GutRunner.tscn")
 
 
 func _ready() -> void:
+	print("GUT_ANDROID_STARTED")
 	var tests := PackedStringArray()
 	for arg in OS.get_cmdline_user_args():
 		var parts := arg.split("=", true, 1)

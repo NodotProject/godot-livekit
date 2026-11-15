@@ -229,6 +229,53 @@ if [ -z "$apk" ]; then
     export_apk "$apk"
 fi
 
+# Launches the app and waits for it to exit, then reads its log. Sets app_exited and result.
+run_app() {
+    "$ADB" shell run-as "$PACKAGE" rm -f "files/$APP_LOG" >/dev/null 2>&1 || true
+    "$ADB" shell am start -W -n "$PACKAGE/com.godot.game.GodotApp" >/dev/null
+    # Emulators can drop off adb for a moment, so a failed adb command doesn't mean the app has
+    # stopped. Only adb answering that the process is gone does.
+    app_exited=false
+    while [ $SECONDS -lt $deadline ]; do
+        sleep 5
+        running=$("$ADB" shell "pidof $PACKAGE >/dev/null && echo yes || echo no" 2>/dev/null | tr -d '\r' || true)
+        if [ "$running" = "no" ]; then
+            app_exited=true
+            break
+        fi
+    done
+    # The app writes Godot's log to a file (see extra_args), which survives adb dropping out.
+    : >"$LOG_FILE"
+    for _ in 1 2 3 4 5; do
+        "$ADB" shell run-as "$PACKAGE" cat "files/$APP_LOG" >"$LOG_FILE" 2>/dev/null && [ -s "$LOG_FILE" ] && break
+        sleep 2
+    done
+    cat "$LOG_FILE"
+    result=$(grep -ao 'GUT_ANDROID_RESULT.*' "$LOG_FILE" | head -1 || true)
+}
+
+# Prints what Android logged about the app stopping (a crash, the system killing it, or its activity
+# going away), and Godot's own output, which reaches logcat even when the log file doesn't.
+print_stop_diagnostics() {
+    echo "App exited: $app_exited"
+    "$ADB" logcat -d -v tag AndroidRuntime:E DEBUG:V libc:F ActivityManager:I ActivityTaskManager:I lmkd:I \
+        Godot:V GodotActivity:V godot:V '*:S' 2>/dev/null | tail -300 || true
+}
+
+# Prints every thread's stack, to show where an app that's still running is stuck. debuggerd needs
+# root, which emulator images (but not most devices) allow.
+print_app_stacks() {
+    local pid
+    if ! "$ADB" root >/dev/null 2>&1; then
+        echo "Can't print the app's stacks without root."
+        return
+    fi
+    "$ADB" wait-for-device
+    pid=$("$ADB" shell pidof "$PACKAGE" 2>/dev/null | tr -d '\r' || true)
+    [ -n "$pid" ] && "$ADB" shell debuggerd -b "$pid" 2>&1 || true
+    "$ADB" unroot >/dev/null 2>&1 || true
+}
+
 echo -e "${YELLOW}Running the tests...${NC}"
 # A fresh install, since each export may be signed with a new key. -g grants the microphone
 # permission.
@@ -238,34 +285,26 @@ $TIMEOUT_CMD 300 "$ADB" wait-for-device
 # Includes the crash buffer, so only this run's crashes fail it.
 "$ADB" logcat -b main,system,crash -c
 STARTED_APP=true
-"$ADB" shell am start -W -n "$PACKAGE/com.godot.game.GodotApp" >/dev/null
-
-# Emulators can drop off adb for a moment, so a failed adb command doesn't mean the app has stopped.
-# Only adb answering that the process is gone does.
 deadline=$((SECONDS + TIMEOUT_SEC))
-app_exited=false
-while [ $SECONDS -lt $deadline ]; do
-    sleep 5
-    running=$("$ADB" shell "pidof $PACKAGE >/dev/null && echo yes || echo no" 2>/dev/null | tr -d '\r' || true)
-    if [ "$running" = "no" ]; then
-        app_exited=true
+# On CI's emulator, the app occasionally exits before Godot finishes starting, so before any of the
+# plugin's tests run. That's retried, while a crash or a failure once the tests start isn't.
+for attempt in 1 2 3; do
+    exited_early=false
+    run_app
+    crash_log=$("$ADB" logcat -d -b crash -v tag 2>/dev/null | tr -d '\r' || true)
+    if [ -n "$result" ] || [ "$app_exited" != true ] || grep -aq 'GUT_ANDROID_STARTED' "$LOG_FILE" \
+        || echo "$crash_log" | grep -q "$PACKAGE"; then
         break
     fi
+    exited_early=true
+    print_stop_diagnostics
+    echo -e "${YELLOW}The app exited before the tests started (attempt ${attempt}).${NC}"
 done
-
-# The app writes Godot's log to a file (see extra_args), which survives adb dropping out.
-for _ in 1 2 3 4 5; do
-    "$ADB" shell run-as "$PACKAGE" cat "files/$APP_LOG" >"$LOG_FILE" 2>/dev/null && [ -s "$LOG_FILE" ] && break
-    sleep 2
-done
-cat "$LOG_FILE"
-result=$(grep -ao 'GUT_ANDROID_RESULT.*' "$LOG_FILE" | head -1 || true)
-if [ -z "$result" ]; then
-    # What Android logged about the app stopping (a crash, or the system killing it), and Godot's own
-    # output, which reaches logcat even when the log file doesn't.
-    echo "App exited: $app_exited"
-    "$ADB" logcat -d -v tag AndroidRuntime:E DEBUG:V libc:F ActivityManager:I lmkd:I godot:V '*:S' 2>/dev/null \
-        | tail -300 || true
+if [ -z "$result" ] && [ "$exited_early" != true ]; then
+    print_stop_diagnostics
+fi
+if [ "$app_exited" != true ]; then
+    print_app_stacks
 fi
 
 if [ -z "$result" ]; then
