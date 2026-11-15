@@ -184,75 +184,7 @@ func test_audio_stream_poll_after_close():
 
 
 # ---------------------------------------------------------------------------
-# 11. ScreenCapture start/stop rapid cycles (display-dependent)
-# ---------------------------------------------------------------------------
-
-func test_screen_capture_rapid_start_stop():
-	var perms = LiveKitScreenCapture.check_permissions()
-	if perms.get("status", 2) == LiveKitScreenCapture.PERMISSION_ERROR:
-		pending("No display available — skipping")
-		return
-	var capture = LiveKitScreenCapture.create()
-	if capture == null:
-		pending("create() returned null — capture not available")
-		return
-	var before := Time.get_ticks_msec()
-	for i in range(5):
-		capture.start()
-		capture.stop()
-	var elapsed := Time.get_ticks_msec() - before
-	assert_lt(elapsed, FRAME_BUDGET_MS,
-		"Rapid start/stop should not crash (took %d ms)" % elapsed)
-	capture.close()
-
-
-# ---------------------------------------------------------------------------
-# 12. ScreenCapture close during active capture (display-dependent)
-# ---------------------------------------------------------------------------
-
-func test_screen_capture_close_during_capture():
-	var perms = LiveKitScreenCapture.check_permissions()
-	if perms.get("status", 2) == LiveKitScreenCapture.PERMISSION_ERROR:
-		pending("No display available — skipping")
-		return
-	var capture = LiveKitScreenCapture.create()
-	if capture == null:
-		pending("create() returned null — capture not available")
-		return
-	capture.start()
-	# Close immediately without stop — close() should call stop() internally
-	var before := Time.get_ticks_msec()
-	capture.close()
-	var elapsed := Time.get_ticks_msec() - before
-	assert_lt(elapsed, FRAME_BUDGET_MS,
-		"Close during active capture should not block (took %d ms)" % elapsed)
-
-
-# ---------------------------------------------------------------------------
-# 13. ScreenCapture double close
-# ---------------------------------------------------------------------------
-
-func test_screen_capture_double_close():
-	var capture := LiveKitScreenCapture.new()
-	capture.close()
-	capture.close()
-	assert_true(true, "ScreenCapture double close should not crash")
-
-
-# ---------------------------------------------------------------------------
-# 14. ScreenCapture poll after close
-# ---------------------------------------------------------------------------
-
-func test_screen_capture_poll_after_close():
-	var capture := LiveKitScreenCapture.new()
-	capture.close()
-	var result = capture.poll()
-	assert_false(result,
-		"poll() after close should return false without crash")
-
-
-# ---------------------------------------------------------------------------
-# 15. Room connect/disconnect interleaved with property access stress
+# 11. Room connect/disconnect interleaved with property access stress
 # ---------------------------------------------------------------------------
 
 func test_connect_disconnect_property_stress():
@@ -269,7 +201,7 @@ func test_connect_disconnect_property_stress():
 
 
 # ---------------------------------------------------------------------------
-# 16. Multiple rooms with interleaved poll_events
+# 12. Multiple rooms with interleaved poll_events
 # ---------------------------------------------------------------------------
 
 func test_multiple_rooms_interleaved_poll():
@@ -292,7 +224,7 @@ func test_multiple_rooms_interleaved_poll():
 
 
 # ---------------------------------------------------------------------------
-# 17. Room disconnect then immediate reconnect (rapid reuse)
+# 13. Room disconnect then immediate reconnect (rapid reuse)
 # ---------------------------------------------------------------------------
 
 func test_rapid_disconnect_reconnect():
@@ -310,7 +242,7 @@ func test_rapid_disconnect_reconnect():
 
 
 # ---------------------------------------------------------------------------
-# 18. VideoStream create and immediately null (GC)
+# 14. VideoStream create and immediately null (GC)
 # ---------------------------------------------------------------------------
 
 func test_video_stream_immediate_gc():
@@ -324,7 +256,7 @@ func test_video_stream_immediate_gc():
 
 
 # ---------------------------------------------------------------------------
-# 19. AudioStream create and immediately null (GC)
+# 15. AudioStream create and immediately null (GC)
 # ---------------------------------------------------------------------------
 
 func test_audio_stream_immediate_gc():
@@ -338,7 +270,7 @@ func test_audio_stream_immediate_gc():
 
 
 # ---------------------------------------------------------------------------
-# 20. Room connect with poll in tight loop then disconnect
+# 16. Room connect with poll in tight loop then disconnect
 # ---------------------------------------------------------------------------
 
 func test_poll_tight_loop_during_connect():

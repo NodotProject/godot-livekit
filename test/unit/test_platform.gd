@@ -36,6 +36,9 @@ func test_all_classes_registered():
 	if OS.has_feature("web"):
 		# Browsers apply their own audio processing to captured audio.
 		classes.erase("LiveKitAudioProcessingModule")
+	if OS.has_feature("android"):
+		# Android builds leave out screen capture (see build.sh).
+		classes.erase("LiveKitScreenCapture")
 
 	for cls in classes:
 		assert_true(ClassDB.class_exists(cls),
