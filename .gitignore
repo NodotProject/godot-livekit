@@ -39,3 +39,6 @@ test_results_*.xml
 
 # Godot UID files
 *.uid
+
+# Android build template, installed by test_android.sh
+/android/
