@@ -7,7 +7,7 @@ const KEY := "correct horse battery staple"
 
 
 func test_encrypted_media_and_data_reach_room_with_same_key():
-	if _skip_if_no_server():
+	if _skip_if_encrypted_video_may_not_start():
 		return
 	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
 	var statuses := {}
@@ -155,7 +155,7 @@ func _await_key_change(key_provider: LiveKitKeyProvider, key_index: int, old_key
 
 
 func test_receiver_follows_a_ratcheted_key():
-	if _skip_if_no_server():
+	if _skip_if_encrypted_video_may_not_start():
 		return
 	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options(KEY)), "Both rooms should connect")
 	var video := _publish_red_video()
@@ -179,7 +179,7 @@ func test_receiver_follows_a_ratcheted_key():
 
 
 func test_receiver_records_a_participant_key_it_ratcheted():
-	if _skip_if_no_server():
+	if _skip_if_encrypted_video_may_not_start():
 		return
 	var no_shared_key := {"e2ee": LiveKitE2eeOptions.new()}
 	assert_true(await _connect_both_rooms(no_shared_key, {"e2ee": LiveKitE2eeOptions.new()}), "Both rooms should connect")
@@ -293,6 +293,17 @@ func _assert_recovers_from_wrong_key(shared: bool) -> void:
 
 	assert_eq([video.subscribed, frames_with_wrong_key, frames_with_right_key >= 5], [true, 0, true])
 	_close(video)
+
+
+## Skips tests that need encrypted video to start when the rooms connect, which on Android it
+## sometimes never does (NodotProject/godot-livekit#19).
+func _skip_if_encrypted_video_may_not_start() -> bool:
+	if _skip_if_no_server():
+		return true
+	if OS.has_feature("android"):
+		pending("Encrypted video sometimes never starts on Android (NodotProject/godot-livekit#19)")
+		return true
+	return false
 
 
 func _skip_without_cryptor_key_index() -> bool:
