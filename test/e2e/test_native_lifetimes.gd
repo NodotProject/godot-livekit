@@ -25,10 +25,7 @@ func test_local_participant_kept_after_disconnecting_is_unbound_but_keeps_its_id
 	var local := _room.get_local_participant()
 
 	_room.disconnect_from_room()
-	# Used while the SDK is still tearing the room down, it may fail, but mustn't crash.
-	local.publish_data("stale".to_utf8_buffer(), true)
-	await get_tree().create_timer(2.0).timeout
-	_take_errors()
+	# Right away, while the SDK is still tearing the room down.
 	local.publish_data("stale".to_utf8_buffer(), true)
 
 	assert_eq(

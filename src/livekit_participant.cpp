@@ -288,7 +288,10 @@ void LiveKitLocalParticipant::unpublish_track(const String &track_sid) {
             published_tracks_.end());
 }
 
-void LiveKitLocalParticipant::release_published_tracks() {
+void LiveKitLocalParticipant::unbind() {
+    // The SDK's local participant methods wait for a reply without a timeout, and a room being torn
+    // down may never send one, so calls made after this fail rather than risk blocking forever.
+    participant_.reset();
     published_tracks_.clear();
 }
 

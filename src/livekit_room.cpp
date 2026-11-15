@@ -214,7 +214,7 @@ bool LiveKitRoom::connect_to_room(const String &url, const String &token, const 
 
     // Clear participant state from the old connection.
     if (local_participant.is_valid()) {
-        local_participant->release_published_tracks();
+        local_participant->unbind();
     }
     local_participant.unref();
     {
@@ -391,7 +391,7 @@ void LiveKitRoom::disconnect_from_room() {
     }
 
     if (local_participant.is_valid()) {
-        local_participant->release_published_tracks();
+        local_participant->unbind();
     }
     local_participant.unref();
     {
