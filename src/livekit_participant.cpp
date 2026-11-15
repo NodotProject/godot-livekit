@@ -3,6 +3,7 @@
 #include "livekit_track_publication.h"
 #include "sdk_call.h"
 
+#include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <livekit/rpc_error.h>
@@ -131,18 +132,7 @@ LiveKitLocalParticipant::LiveKitLocalParticipant() {
 LiveKitLocalParticipant::~LiveKitLocalParticipant() {
     // Wait for any in-flight RPC thread.
     rpc_thread_.join_or_detach(2000);
-
-    // Unregister all RPC methods so the SDK doesn't invoke callbacks
-    // into a freed object.
-    if (auto lp = get_native_local_participant()) {
-        for (const auto &method : registered_rpc_methods_) {
-            try {
-                lp->unregisterRpcMethod(method);
-            } catch (const std::exception &) {
-                // The room is going away, so it won't invoke the method anyway.
-            }
-        }
-    }
+    unregister_rpc_methods();
 }
 
 std::shared_ptr<livekit::LocalParticipant> LiveKitLocalParticipant::get_native_local_participant() const {
@@ -289,6 +279,8 @@ void LiveKitLocalParticipant::unpublish_track(const String &track_sid) {
 }
 
 void LiveKitLocalParticipant::unbind() {
+    // Unbinding stops the destructor from reaching the SDK to unregister these.
+    unregister_rpc_methods();
     // The SDK's local participant methods wait for a reply without a timeout, and a room being torn
     // down may never send one, so calls made after this fail rather than risk blocking forever.
     participant_.reset();
@@ -342,21 +334,32 @@ void LiveKitLocalParticipant::register_rpc_method(const String &method) {
     }
 
     std::string method_name = method.utf8().get_data();
+    // The SDK calls handlers on its own thread, and may still be running one when this participant is
+    // freed, so the handler only holds its ID and emits from the main thread if it's still around.
+    const uint64_t self_id = get_instance_id();
     bool registered = call_sdk("LiveKitLocalParticipant::register_rpc_method", [&] {
         lp->registerRpcMethod(method_name,
-                [this, method](const livekit::RpcInvocationData &data) -> std::optional<std::string> {
-                    call_deferred("emit_signal", "rpc_method_invoked",
-                            method,
-                            String(data.request_id.c_str()),
-                            String(data.caller_identity.c_str()),
-                            String(data.payload.c_str()),
-                            data.response_timeout_sec);
+                [self_id, method](const livekit::RpcInvocationData &data) -> std::optional<std::string> {
+                    callable_mp_static(&LiveKitLocalParticipant::emit_rpc_method_invoked)
+                            .call_deferred(self_id, method,
+                                    String(data.request_id.c_str()),
+                                    String(data.caller_identity.c_str()),
+                                    String(data.payload.c_str()),
+                                    data.response_timeout_sec);
                     // Replies aren't supported yet (see _bind_methods), so the caller gets an empty response.
                     return std::nullopt;
                 });
     });
     if (registered) {
         registered_rpc_methods_.push_back(method_name);
+    }
+}
+
+void LiveKitLocalParticipant::emit_rpc_method_invoked(uint64_t p_participant_id, const String &p_method,
+        const String &p_request_id, const String &p_caller_identity, const String &p_payload, double p_response_timeout) {
+    if (auto *participant = Object::cast_to<LiveKitLocalParticipant>(ObjectDB::get_instance(p_participant_id))) {
+        participant->emit_signal("rpc_method_invoked", p_method, p_request_id, p_caller_identity, p_payload,
+                p_response_timeout);
     }
 }
 
@@ -385,6 +388,19 @@ void LiveKitLocalParticipant::respond_to_rpc_error(const String &request_id, int
 }
 
 // LiveKitRemoteParticipant
+
+void LiveKitLocalParticipant::unregister_rpc_methods() {
+    if (auto lp = get_native_local_participant()) {
+        for (const auto &method : registered_rpc_methods_) {
+            try {
+                lp->unregisterRpcMethod(method);
+            } catch (const std::exception &) {
+                // The room is going away, so it won't invoke the method anyway.
+            }
+        }
+    }
+    registered_rpc_methods_.clear();
+}
 
 void LiveKitRemoteParticipant::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_track_publications"), &LiveKitRemoteParticipant::get_track_publications);

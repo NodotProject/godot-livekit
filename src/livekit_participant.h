@@ -66,6 +66,11 @@ private:
     std::vector<std::string> registered_rpc_methods_;
     DetachableThread rpc_thread_;
 
+    /// Emits rpc_method_invoked from the participant with this ID, if it hasn't been freed.
+    static void emit_rpc_method_invoked(uint64_t p_participant_id, const String &p_method, const String &p_request_id,
+            const String &p_caller_identity, const String &p_payload, double p_response_timeout);
+    void unregister_rpc_methods();
+
 protected:
     static void _bind_methods();
 
