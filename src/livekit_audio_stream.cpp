@@ -152,7 +152,8 @@ int LiveKitAudioStream::poll(const Ref<AudioStreamGeneratorPlayback> &playback) 
         std::unique_lock<std::mutex> lock(audio_mutex_, std::try_to_lock);
         if (!lock.owns_lock()) {
             uint32_t count = lock_contention_count_.fetch_add(1) + 1;
-            if (count == 1 || (count % 100) == 0) {
+            // An occasional skipped poll is harmless, since the next one picks up what the reader added.
+            if ((count % 100) == 0) {
                 UtilityFunctions::push_warning("LiveKitAudioStream::poll: lock contention (", count, " skipped frames)");
             }
             return 0;

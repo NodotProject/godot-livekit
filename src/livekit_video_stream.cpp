@@ -132,7 +132,8 @@ bool LiveKitVideoStream::poll() {
         std::unique_lock<std::mutex> lock(frame_mutex_, std::try_to_lock);
         if (!lock.owns_lock()) {
             uint32_t count = lock_contention_count_.fetch_add(1) + 1;
-            if (count == 1 || (count % 100) == 0) {
+            // An occasional skipped poll is harmless, since the next one picks up what the reader added.
+            if ((count % 100) == 0) {
                 UtilityFunctions::push_warning("LiveKitVideoStream::poll: lock contention (", count, " skipped frames)");
             }
             return false;
