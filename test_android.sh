@@ -255,8 +255,11 @@ done
 cat "$LOG_FILE"
 result=$(grep -ao 'GUT_ANDROID_RESULT.*' "$LOG_FILE" | head -1 || true)
 if [ -z "$result" ]; then
-    # Anything Android logged about a crash.
-    "$ADB" logcat -d -v tag AndroidRuntime:E DEBUG:V libc:F '*:S' 2>/dev/null || true
+    # What Android logged about the app stopping (a crash, or the system killing it), and Godot's own
+    # output, which reaches logcat even when the log file doesn't.
+    echo "App exited: $app_exited"
+    "$ADB" logcat -d -v tag AndroidRuntime:E DEBUG:V libc:F ActivityManager:I lmkd:I godot:V '*:S' 2>/dev/null \
+        | tail -300 || true
 fi
 
 if [ -z "$result" ]; then
