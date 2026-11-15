@@ -230,7 +230,8 @@ echo -e "${YELLOW}Running the tests...${NC}"
 timeout 300 "$ADB" wait-for-device
 "$ADB" uninstall "$PACKAGE" >/dev/null 2>&1 || true
 "$ADB" install -g "$apk" >/dev/null
-"$ADB" logcat -c
+# Includes the crash buffer, so only this run's crashes fail it.
+"$ADB" logcat -b main,system,crash -c
 STARTED_APP=true
 "$ADB" shell am start -W -n "$PACKAGE/com.godot.game.GodotApp" >/dev/null
 
@@ -266,9 +267,15 @@ if [ -z "$result" ]; then
     echo -e "${RED}Android tests did not finish (the app stopped early or took over ${TIMEOUT_SEC}s).${NC}"
     exit 1
 fi
-# The runner reports before quitting, so a hang while shutting down would otherwise go unnoticed.
+# The runner reports before quitting, so a hang or crash while shutting down would otherwise go unnoticed.
 if [ "$app_exited" != true ]; then
     echo -e "${RED}The app didn't exit within ${TIMEOUT_SEC}s after running the tests.${NC}"
+    exit 1
+fi
+crash_log=$("$ADB" logcat -d -b crash -v tag 2>/dev/null | tr -d '\r' || true)
+if echo "$crash_log" | grep -q "$PACKAGE"; then
+    echo "$crash_log"
+    echo -e "${RED}The app crashed after running the tests.${NC}"
     exit 1
 fi
 failing=$(echo "$result" | sed -E 's/.*failing=([0-9]+).*/\1/')
