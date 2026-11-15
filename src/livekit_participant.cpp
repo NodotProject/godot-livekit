@@ -288,6 +288,10 @@ void LiveKitLocalParticipant::unpublish_track(const String &track_sid) {
             published_tracks_.end());
 }
 
+void LiveKitLocalParticipant::release_published_tracks() {
+    published_tracks_.clear();
+}
+
 // RPC
 
 void LiveKitLocalParticipant::perform_rpc(const String &destination, const String &method, const String &payload, double timeout) {

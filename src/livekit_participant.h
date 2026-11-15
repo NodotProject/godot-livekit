@@ -83,6 +83,9 @@ public:
     Dictionary get_track_publications() const;
     Ref<LiveKitLocalTrackPublication> publish_track(const Ref<LiveKitTrack> &track, const Dictionary &options);
     void unpublish_track(const String &track_sid);
+    /// Lets go of the tracks this participant published, for the room to call when its connection
+    /// ends, since apps may keep the participant afterwards.
+    void release_published_tracks();
 
     // RPC (async — result delivered via rpc_response_received / rpc_error signals)
     void perform_rpc(const String &destination, const String &method, const String &payload, double timeout);

@@ -34,6 +34,11 @@ PACKAGE="org.godotlivekit.tests"
 # Godot's log in the app's user:// folder.
 APP_LOG="test.log"
 TIMEOUT_SEC="${ANDROID_TEST_TIMEOUT:-1800}"
+# Homebrew's coreutils names it gtimeout on macOS.
+TIMEOUT_CMD="timeout"
+if ! command -v timeout &>/dev/null && command -v gtimeout &>/dev/null; then
+    TIMEOUT_CMD="gtimeout"
+fi
 
 if [ -f "./godot" ]; then
     GODOT_CMD="./godot"
@@ -201,10 +206,10 @@ EOF
 
     echo -e "${YELLOW}Exporting Android test build (${arch})...${NC}"
     # Importing fails harmlessly on errors the export reports too (e.g. a missing native library).
-    timeout 300 $GODOT_CMD --headless --import >/dev/null 2>&1 || true
+    $TIMEOUT_CMD 300 $GODOT_CMD --headless --import >/dev/null 2>&1 || true
     rm -f "$apk_path"
     mkdir -p "$(dirname "$apk_path")"
-    if ! timeout 1200 $GODOT_CMD --headless --export-debug "Android Test" "$apk_path" >"$WORK_DIR/export.log" 2>&1 \
+    if ! $TIMEOUT_CMD 1200 $GODOT_CMD --headless --export-debug "Android Test" "$apk_path" >"$WORK_DIR/export.log" 2>&1 \
         || [ ! -f "$apk_path" ]; then
         tail -40 "$WORK_DIR/export.log"
         echo -e "${RED}Android export failed.${NC}"
@@ -227,7 +232,7 @@ fi
 echo -e "${YELLOW}Running the tests...${NC}"
 # A fresh install, since each export may be signed with a new key. -g grants the microphone
 # permission.
-timeout 300 "$ADB" wait-for-device
+$TIMEOUT_CMD 300 "$ADB" wait-for-device
 "$ADB" uninstall "$PACKAGE" >/dev/null 2>&1 || true
 "$ADB" install -g "$apk" >/dev/null
 # Includes the crash buffer, so only this run's crashes fail it.

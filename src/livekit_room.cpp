@@ -213,6 +213,9 @@ bool LiveKitRoom::connect_to_room(const String &url, const String &token, const 
     }
 
     // Clear participant state from the old connection.
+    if (local_participant.is_valid()) {
+        local_participant->release_published_tracks();
+    }
     local_participant.unref();
     {
         std::lock_guard<std::mutex> plock(participants_mutex_);
@@ -387,6 +390,9 @@ void LiveKitRoom::disconnect_from_room() {
         disconnect_thread_.detach();
     }
 
+    if (local_participant.is_valid()) {
+        local_participant->release_published_tracks();
+    }
     local_participant.unref();
     {
         std::lock_guard<std::mutex> plock(participants_mutex_);
