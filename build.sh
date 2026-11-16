@@ -28,8 +28,8 @@ PROTOC_SHA256_MACOS="c06b6c5527c9b11a30a9c103400ee59eb6882f1766ea786fe4bdbb7f55e
 MIN_ANDROID_NDK_MAJOR=27
 GODOT_CPP_VERSION="godot-4.5-stable"
 FRAMETAP_VERSION="0.1.3"
-LIVEKIT_JS_VERSION="2.22.3"
-LIVEKIT_JS_SHA256="0f920230001fcbfdccb0bcd2efffd64da8594808908953ed466d4c39c1529fa3"
+LIVEKIT_JS_VERSION="2.24.0"
+LIVEKIT_JS_SHA256="88b41eb0905a66dd3f46009c9a024aa72503b53398ae9a70c1f60258d246d262"
 SKIP_FRAMETAP=false
 SKIP_LIVEKIT_SDK=false
 BUILD_LIVEKIT_SDK=false
@@ -316,8 +316,11 @@ fetch_livekit_js() {
     verify_checksum "${archive}" "${LIVEKIT_JS_SHA256}"
     rm -rf livekit-js
     mkdir -p livekit-js
-    tar -xzf "${archive}" -C livekit-js --strip-components=2 package/dist/livekit-client.umd.js package/dist/livekit-client.e2ee.worker.js
-    tar -xzf "${archive}" -C livekit-js --strip-components=1 package/LICENSE
+    # npm gives every file the same 1985 timestamp, which SCons would take to mean that a
+    # different version's files are unchanged, and keep embedding the old version. (-m stamps
+    # them with the current time instead.)
+    tar -xmzf "${archive}" -C livekit-js --strip-components=2 package/dist/livekit-client.umd.js package/dist/livekit-client.e2ee.worker.js
+    tar -xmzf "${archive}" -C livekit-js --strip-components=1 package/LICENSE
     rm "${archive}"
     echo "$LIVEKIT_JS_VERSION" > livekit-js/.version
     echo -e "${GREEN}livekit-client downloaded successfully!${NC}"
