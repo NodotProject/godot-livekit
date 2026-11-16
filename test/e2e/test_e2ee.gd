@@ -226,7 +226,11 @@ func test_receiver_records_a_participant_key_it_ratcheted():
 func test_encryption_turned_off_and_on_again_stays_on():
 	if _skip_if_no_server():
 		return
-	assert_true(await _connect_both_rooms(_e2ee_options(KEY), _e2ee_options("wrong key")), "Both rooms should connect")
+	var room2_options := _e2ee_options("wrong key")
+	# Natively, a receiver that's ratcheting a key it can't decrypt with puts that key back when it
+	# gives up, even if set_shared_key() replaced it in the meantime.
+	room2_options.e2ee.ratchet_window_size = 0
+	assert_true(await _connect_both_rooms(_e2ee_options(KEY), room2_options), "Both rooms should connect")
 	var manager := _room.get_e2ee_manager()
 	manager.set_enabled(false)
 	manager.set_enabled(true)
