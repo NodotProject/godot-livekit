@@ -11,6 +11,7 @@
 #include <livekit/local_participant.h>
 #include <livekit/remote_participant.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -35,13 +36,17 @@ public:
 
 protected:
     static void _bind_methods();
-    livekit::Participant *participant_ = nullptr;
+    // Weak, since the room owns its participants and frees them once they disconnect.
+    std::weak_ptr<livekit::Participant> participant_;
+    // Kept, since it never changes, and handlers for a participant leaving (e.g. participant_disconnected)
+    // often run after the SDK has freed it, but still need to know who left.
+    std::string identity_;
 
 public:
     LiveKitParticipant();
     ~LiveKitParticipant();
 
-    virtual void bind_participant(livekit::Participant *p_participant);
+    void bind_participant(const std::weak_ptr<livekit::Participant> &p_participant, const std::string &p_identity);
 
     String get_sid() const;
     String get_name() const;
@@ -55,9 +60,16 @@ class LiveKitLocalParticipant : public LiveKitParticipant {
     GDCLASS(LiveKitLocalParticipant, LiveKitParticipant)
 
 private:
-    livekit::LocalParticipant *local_participant_ = nullptr;
+    // The SDK only holds published tracks weakly, and forgets their publications and events once
+    // they're freed, so these keep them alive until they're unpublished.
+    std::vector<std::shared_ptr<livekit::Track>> published_tracks_;
     std::vector<std::string> registered_rpc_methods_;
     DetachableThread rpc_thread_;
+
+    /// Emits rpc_method_invoked from the participant with this ID, if it hasn't been freed.
+    static void emit_rpc_method_invoked(uint64_t p_participant_id, const String &p_method, const String &p_request_id,
+            const String &p_caller_identity, const String &p_payload, double p_response_timeout);
+    void unregister_rpc_methods();
 
 protected:
     static void _bind_methods();
@@ -66,8 +78,7 @@ public:
     LiveKitLocalParticipant();
     ~LiveKitLocalParticipant();
 
-    void bind_local_participant(livekit::LocalParticipant *p);
-    livekit::LocalParticipant *get_native_local_participant() const { return local_participant_; }
+    std::shared_ptr<livekit::LocalParticipant> get_native_local_participant() const;
 
     void publish_data(const PackedByteArray &data, bool reliable, const PackedStringArray &destination_identities, const String &topic);
     void set_metadata(const String &metadata);
@@ -77,6 +88,9 @@ public:
     Dictionary get_track_publications() const;
     Ref<LiveKitLocalTrackPublication> publish_track(const Ref<LiveKitTrack> &track, const Dictionary &options);
     void unpublish_track(const String &track_sid);
+    /// Unbinds this participant and lets go of the tracks it published, for the room to call when its
+    /// connection ends, since apps may keep the participant afterwards.
+    void unbind();
 
     // RPC (async — result delivered via rpc_response_received / rpc_error signals)
     void perform_rpc(const String &destination, const String &method, const String &payload, double timeout);
@@ -89,9 +103,6 @@ public:
 class LiveKitRemoteParticipant : public LiveKitParticipant {
     GDCLASS(LiveKitRemoteParticipant, LiveKitParticipant)
 
-private:
-    livekit::RemoteParticipant *remote_participant_ = nullptr;
-
 protected:
     static void _bind_methods();
 
@@ -99,8 +110,7 @@ public:
     LiveKitRemoteParticipant();
     ~LiveKitRemoteParticipant();
 
-    void bind_remote_participant(livekit::RemoteParticipant *p);
-    livekit::RemoteParticipant *get_native_remote_participant() const { return remote_participant_; }
+    std::shared_ptr<livekit::RemoteParticipant> get_native_remote_participant() const;
 
     Dictionary get_track_publications() const;
 };

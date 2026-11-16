@@ -1,4 +1,5 @@
 #include "livekit_e2ee.h"
+#include "sdk_call.h"
 
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -118,26 +119,29 @@ LiveKitKeyProvider::LiveKitKeyProvider() {
 LiveKitKeyProvider::~LiveKitKeyProvider() {
 }
 
-void LiveKitKeyProvider::bind_key_provider(livekit::E2EEManager::KeyProvider *kp) {
+void LiveKitKeyProvider::bind_key_provider(const std::weak_ptr<livekit::E2EEManager::KeyProvider> &kp) {
     key_provider_ = kp;
 }
 
 void LiveKitKeyProvider::set_shared_key(const PackedByteArray &key, int key_index) {
-    if (!key_provider_) {
+    auto kp = key_provider_.lock();
+    if (!kp) {
         UtilityFunctions::push_error("LiveKitKeyProvider::set_shared_key: not bound");
         return;
     }
     std::vector<uint8_t> k(key.ptr(), key.ptr() + key.size());
-    key_provider_->setSharedKey(k, key_index);
+    call_sdk("LiveKitKeyProvider::set_shared_key", [&] { kp->setSharedKey(k, key_index); });
 }
 
 PackedByteArray LiveKitKeyProvider::get_shared_key(int key_index) const {
     PackedByteArray result;
-    if (!key_provider_) {
+    auto kp = key_provider_.lock();
+    if (!kp) {
         UtilityFunctions::push_error("LiveKitKeyProvider::get_shared_key: not bound");
         return result;
     }
-    auto k = key_provider_->exportSharedKey(key_index);
+    std::vector<uint8_t> k;
+    call_sdk("LiveKitKeyProvider::get_shared_key", [&] { k = kp->exportSharedKey(key_index); });
     result.resize(k.size());
     memcpy(result.ptrw(), k.data(), k.size());
     return result;
@@ -145,34 +149,39 @@ PackedByteArray LiveKitKeyProvider::get_shared_key(int key_index) const {
 
 PackedByteArray LiveKitKeyProvider::ratchet_shared_key(int key_index) {
     PackedByteArray result;
-    if (!key_provider_) {
+    auto kp = key_provider_.lock();
+    if (!kp) {
         UtilityFunctions::push_error("LiveKitKeyProvider::ratchet_shared_key: not bound");
         return result;
     }
-    auto k = key_provider_->ratchetSharedKey(key_index);
+    std::vector<uint8_t> k;
+    call_sdk("LiveKitKeyProvider::ratchet_shared_key", [&] { k = kp->ratchetSharedKey(key_index); });
     result.resize(k.size());
     memcpy(result.ptrw(), k.data(), k.size());
     return result;
 }
 
 void LiveKitKeyProvider::set_key(const String &participant_identity, const PackedByteArray &key, int key_index) {
-    if (!key_provider_) {
+    auto kp = key_provider_.lock();
+    if (!kp) {
         UtilityFunctions::push_error("LiveKitKeyProvider::set_key: not bound");
         return;
     }
     std::string identity = participant_identity.utf8().get_data();
     std::vector<uint8_t> k(key.ptr(), key.ptr() + key.size());
-    key_provider_->setKey(identity, k, key_index);
+    call_sdk("LiveKitKeyProvider::set_key", [&] { kp->setKey(identity, k, key_index); });
 }
 
 PackedByteArray LiveKitKeyProvider::get_key(const String &participant_identity, int key_index) const {
     PackedByteArray result;
-    if (!key_provider_) {
+    auto kp = key_provider_.lock();
+    if (!kp) {
         UtilityFunctions::push_error("LiveKitKeyProvider::get_key: not bound");
         return result;
     }
     std::string identity = participant_identity.utf8().get_data();
-    auto k = key_provider_->exportKey(identity, key_index);
+    std::vector<uint8_t> k;
+    call_sdk("LiveKitKeyProvider::get_key", [&] { k = kp->exportKey(identity, key_index); });
     result.resize(k.size());
     memcpy(result.ptrw(), k.data(), k.size());
     return result;
@@ -180,12 +189,14 @@ PackedByteArray LiveKitKeyProvider::get_key(const String &participant_identity, 
 
 PackedByteArray LiveKitKeyProvider::ratchet_key(const String &participant_identity, int key_index) {
     PackedByteArray result;
-    if (!key_provider_) {
+    auto kp = key_provider_.lock();
+    if (!kp) {
         UtilityFunctions::push_error("LiveKitKeyProvider::ratchet_key: not bound");
         return result;
     }
     std::string identity = participant_identity.utf8().get_data();
-    auto k = key_provider_->ratchetKey(identity, key_index);
+    std::vector<uint8_t> k;
+    call_sdk("LiveKitKeyProvider::ratchet_key", [&] { k = kp->ratchetKey(identity, key_index); });
     result.resize(k.size());
     memcpy(result.ptrw(), k.data(), k.size());
     return result;
@@ -243,8 +254,9 @@ void LiveKitFrameCryptor::set_enabled(bool enabled) {
         UtilityFunctions::push_error("LiveKitFrameCryptor::set_enabled: not bound");
         return;
     }
-    frame_cryptor_->setEnabled(enabled);
-    enabled_ = enabled;
+    // client-sdk-cpp 1.13.1's FrameCryptor doesn't send its track's sid, and the FFI aborts the
+    // process when it's missing (livekit/client-sdk-cpp#311).
+    UtilityFunctions::push_error("LiveKitFrameCryptor::set_enabled: not supported by the LiveKit C++ SDK yet");
 }
 
 void LiveKitFrameCryptor::set_key_index(int key_index) {
@@ -252,8 +264,9 @@ void LiveKitFrameCryptor::set_key_index(int key_index) {
         UtilityFunctions::push_error("LiveKitFrameCryptor::set_key_index: not bound");
         return;
     }
-    frame_cryptor_->setKeyIndex(key_index);
-    key_index_ = key_index;
+    // client-sdk-cpp 1.13.1's FrameCryptor doesn't send its track's sid, and the FFI aborts the
+    // process when it's missing (livekit/client-sdk-cpp#311).
+    UtilityFunctions::push_error("LiveKitFrameCryptor::set_key_index: not supported by the LiveKit C++ SDK yet");
 }
 
 // --- LiveKitE2eeManager ---
@@ -274,33 +287,36 @@ LiveKitE2eeManager::LiveKitE2eeManager() {
 LiveKitE2eeManager::~LiveKitE2eeManager() {
 }
 
-void LiveKitE2eeManager::bind_manager(livekit::E2EEManager *mgr) {
+void LiveKitE2eeManager::bind_manager(const std::weak_ptr<livekit::E2EEManager> &mgr) {
     e2ee_manager_ = mgr;
     key_provider_.unref();
 }
 
 bool LiveKitE2eeManager::get_enabled() const {
-    if (!e2ee_manager_) {
+    auto mgr = e2ee_manager_.lock();
+    if (!mgr) {
         return false;
     }
-    return e2ee_manager_->enabled();
+    return mgr->enabled();
 }
 
 void LiveKitE2eeManager::set_enabled(bool enabled) {
-    if (!e2ee_manager_) {
+    auto mgr = e2ee_manager_.lock();
+    if (!mgr) {
         UtilityFunctions::push_error("LiveKitE2eeManager::set_enabled: not bound");
         return;
     }
-    e2ee_manager_->setEnabled(enabled);
+    call_sdk("LiveKitE2eeManager::set_enabled", [&] { mgr->setEnabled(enabled); });
 }
 
 Ref<LiveKitKeyProvider> LiveKitE2eeManager::get_key_provider() {
-    if (!e2ee_manager_) {
+    auto mgr = e2ee_manager_.lock();
+    if (!mgr) {
         return Ref<LiveKitKeyProvider>();
     }
 
-    livekit::E2EEManager::KeyProvider *kp = e2ee_manager_->keyProvider();
-    if (!kp) {
+    auto kp = mgr->keyProvider();
+    if (kp.expired()) {
         return Ref<LiveKitKeyProvider>();
     }
 
@@ -313,11 +329,15 @@ Ref<LiveKitKeyProvider> LiveKitE2eeManager::get_key_provider() {
 
 Array LiveKitE2eeManager::get_frame_cryptors() const {
     Array result;
-    if (!e2ee_manager_) {
+    auto mgr = e2ee_manager_.lock();
+    if (!mgr) {
         return result;
     }
 
-    auto cryptors = e2ee_manager_->frameCryptors();
+    std::vector<livekit::E2EEManager::FrameCryptor> cryptors;
+    if (!call_sdk("LiveKitE2eeManager::get_frame_cryptors", [&] { cryptors = mgr->frameCryptors(); })) {
+        return result;
+    }
     for (auto &fc : cryptors) {
         Ref<LiveKitFrameCryptor> godot_fc;
         godot_fc.instantiate();

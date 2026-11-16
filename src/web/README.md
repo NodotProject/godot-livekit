@@ -17,7 +17,7 @@ The web build is meant to behave like the native one, and the shared tests in `t
 
 ## Rooms and participants
 
-- **Participants belong to their connection.** A participant object kept from an earlier connection reports "participant is no longer connected" when used, rather than acting on a later connection's participant. (Natively, the SDK has freed those participants.)
+- **Participants belong to their connection.** A participant object kept from an earlier connection reports "participant is no longer connected" when used, rather than acting on a later connection's participant. (Natively, it reports that it isn't bound, and its getters return empty values.)
 - **Publishing is asynchronous.** The publication `publish_track()` returns starts with an empty sid, which fills in once `local_track_published` fires. From then on, `get_track_publications()` includes it.
 
 ## Audio

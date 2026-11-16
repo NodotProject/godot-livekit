@@ -48,7 +48,7 @@ if is_android:
         Exit(1)
     ndk_bin = toolchain_bins[0]
     ndk_sysroot = os.path.join(os.path.dirname(ndk_bin), 'sysroot')
-    android_target = 'aarch64-linux-android24'
+    android_target = 'x86_64-linux-android24' if arch == 'x86_64' else 'aarch64-linux-android24'
     env = Environment()
     env.Replace(CC=os.path.join(ndk_bin, 'clang'))
     env.Replace(CXX=os.path.join(ndk_bin, 'clang++'))
@@ -95,7 +95,9 @@ if enable_screen_capture:
 env.Append(LIBPATH=libpath)
 
 if is_android:
-    env.Append(CCFLAGS=[f'--target={android_target}', f'--sysroot={ndk_sysroot}', '-fPIC', '-march=armv8-a'])
+    env.Append(CCFLAGS=[f'--target={android_target}', f'--sysroot={ndk_sysroot}', '-fPIC'])
+    if arch == 'arm64':
+        env.Append(CCFLAGS=['-march=armv8-a'])
     env.Append(CXXFLAGS=['-std=c++20'])
     env.Append(LINKFLAGS=[f'--target={android_target}', f'--sysroot={ndk_sysroot}'])
     env.Append(CPPDEFINES=['ANDROID_ENABLED', 'UNIX_ENABLED'])
@@ -226,6 +228,9 @@ else:  # linux, android
 # file-extension suffix (which causes "should have exactly one target
 # with the suffix: .dll").
 lib_name = f"{env['SHLIBPREFIX']}godot-livekit.{platform}.{arch}{env['SHLIBSUFFIX']}"
+if platform == 'windows':
+    src_files.append('src/windows_pin.cpp')
+
 library = env.SharedLibrary(target=lib_name, source=src_files)
 installed_library = env.Install('addons/godot-livekit/bin', library)
 Default(installed_library)

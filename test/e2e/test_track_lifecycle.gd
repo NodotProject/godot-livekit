@@ -114,6 +114,32 @@ func test_publish_unpublish_cycle():
 	assert_true(remote_gone, "Room2 should see track removed")
 
 
+
+func test_track_published_without_keeping_it_stays_published():
+	if _skip_if_no_server():
+		return
+	assert_true(await _connect_both_rooms(), "Both rooms should connect")
+	var lp = _room.get_local_participant()
+	var published_sids := []
+	_room.local_track_published.connect(func(publication, _track): published_sids.append(publication.get_sid()))
+
+	_publish_unkept_audio_track(lp)
+
+	assert_true(await _poll_until(_room, func(): return not published_sids.is_empty(), 10.0),
+			"Room should publish the track")
+	# Natively, the SDK forgets a track's publication once the track is freed (but leaves it
+	# published), so give it a moment to be freed.
+	await _poll_both(func(): return false, 2.0)
+	assert_eq([lp.get_track_publications().keys(), _get_remote_track_publications(_room2).map(func(p): return p.get_sid())],
+			[published_sids, published_sids])
+
+
+## Publishes a track that nothing else refers to once this returns (unlike a temporary in the
+## caller, which GDScript keeps until the caller returns).
+func _publish_unkept_audio_track(lp: LiveKitLocalParticipant) -> void:
+	lp.publish_track(LiveKitLocalAudioTrack.create("e2e_unkept", LiveKitAudioSource.create(48000, 1, 0)), {})
+
+
 func test_multiple_tracks():
 	if _skip_if_no_server():
 		return

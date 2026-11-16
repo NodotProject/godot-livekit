@@ -135,6 +135,8 @@ If you have [GUT (Godot Unit Test)](https://github.com/bitwes/Gut) installed in 
 
 `./test_web.sh` runs the tests that apply to the web build in headless Chrome. It requires a web build, Godot's web export templates, and `google-chrome`.
 
+`./test_android.sh` runs the tests on a connected Android device or emulator. It requires an Android build for the device (`./build.sh android x86_64` for an x86_64 emulator), Godot's Android export templates, the Android SDK (`ANDROID_HOME`) and a JDK (`JAVA_HOME`).
+
 ## Continuous Integration
 
 The project is configured with GitHub Actions to automatically build releases for Linux, Windows, and macOS whenever a new tag (e.g., `v1.0.0`) is pushed. Check the `.github/workflows` directory for details.

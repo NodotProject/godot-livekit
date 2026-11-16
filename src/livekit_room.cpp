@@ -141,11 +141,11 @@ LiveKitRoom::LiveKitRoom() {
 LiveKitRoom::~LiveKitRoom() {
     LiveKitPoller::instance().unregister_room(this);
 
-    // Tell any detached connect thread not to touch `this` after Connect()
+    // Tell any detached connect thread not to touch `this` after connect()
     // returns (event_mutex_, pending_events_ will be destroyed).
     alive_->store(false);
 
-    // Detach delegate early — this may unblock a pending Connect() by
+    // Detach delegate early — this may unblock a pending connect() by
     // preventing the SDK from waiting on delegate callbacks.
     if (room) {
         room->setDelegate(nullptr);
@@ -163,9 +163,9 @@ LiveKitRoom::~LiveKitRoom() {
     disconnect_thread_.join_or_detach(5000);
 
     // If the connect thread finished, join it and destroy the Room normally.
-    // If it's still running (Connect() stuck), move the native Room into a
-    // detached cleanup thread so it stays alive until Connect() returns —
-    // destroying the Room while Connect() is in progress is use-after-free.
+    // If it's still running (connect() stuck), move the native Room into a
+    // detached cleanup thread so it stays alive until connect() returns —
+    // destroying the Room while connect() is in progress is use-after-free.
     if (connect_thread_.joinable() && !connect_thread_.finished()) {
         auto orphan_room = std::move(room);
         auto orphan_delegate = std::move(delegate);
@@ -213,6 +213,9 @@ bool LiveKitRoom::connect_to_room(const String &url, const String &token, const 
     }
 
     // Clear participant state from the old connection.
+    if (local_participant.is_valid()) {
+        local_participant->unbind();
+    }
     local_participant.unref();
     {
         std::lock_guard<std::mutex> plock(participants_mutex_);
@@ -239,7 +242,7 @@ bool LiveKitRoom::connect_to_room(const String &url, const String &token, const 
     // Move the old connect thread out so the cleanup lambda can join it.
     std::thread old_ct = connect_thread_.release();
 
-    // Background the old room destruction (may block waiting for Connect()).
+    // Background the old room destruction (may block waiting for connect()).
     disconnect_thread_.start([old_room = std::move(old_room), old_delegate = std::move(old_delegate), old_ct = std::move(old_ct)]() mutable {
         if (old_ct.joinable()) {
             old_ct.join();
@@ -261,14 +264,14 @@ bool LiveKitRoom::connect_to_room(const String &url, const String &token, const 
     std::string url_str(url.utf8().get_data());
     std::string token_str(token.utf8().get_data());
 
-    // Run the blocking Connect() on a background thread so the main
+    // Run the blocking connect() on a background thread so the main
     // thread (and Godot's rendering/input loop) stays responsive.
     auto alive = alive_;
     livekit::Room *room_ptr = room.get();
     connect_thread_.start([this, alive, room_ptr, url_str, token_str, room_options]() {
         bool success = false;
         try {
-            success = room_ptr->Connect(url_str.c_str(), token_str.c_str(), room_options);
+            success = room_ptr->connect(url_str, token_str, room_options);
         } catch (const std::exception &e) {
             UtilityFunctions::push_error("LiveKitRoom::connect_to_room: connection failed: ", String(e.what()));
         } catch (...) {
@@ -304,28 +307,29 @@ void LiveKitRoom::_finalize_connection(bool success) {
         connection_state = STATE_CONNECTED;
 
         // Initialize local participant
-        livekit::LocalParticipant *lp = room->localParticipant();
-        if (lp) {
+        if (auto lp = room->localParticipant().lock()) {
             local_participant.instantiate();
-            local_participant->bind_participant(lp);
-            local_participant->bind_local_participant(lp);
+            local_participant->bind_participant(lp, lp->identity());
         }
 
         // Initialize remote participants
         auto remotes = room->remoteParticipants();
         for (auto const &r : remotes) {
+            auto remote = r.lock();
+            if (!remote) {
+                continue;
+            }
             Ref<LiveKitRemoteParticipant> p;
             p.instantiate();
-            p->bind_participant(r.get());
-            p->bind_remote_participant(static_cast<livekit::RemoteParticipant *>(r.get()));
+            p->bind_participant(r, remote->identity());
             std::lock_guard<std::mutex> plock(participants_mutex_);
             remote_participants[p->get_identity()] = p;
         }
 
 #ifdef LIVEKIT_E2EE_SUPPORTED
         // Initialize E2EE manager if available
-        livekit::E2EEManager *mgr = room->e2eeManager();
-        if (mgr) {
+        auto mgr = room->e2eeManager();
+        if (!mgr.expired()) {
             e2ee_manager_.instantiate();
             e2ee_manager_->bind_manager(mgr);
         }
@@ -339,7 +343,7 @@ void LiveKitRoom::_finalize_connection(bool success) {
 }
 
 void LiveKitRoom::poll_events() {
-    // Check for connection timeout while Connect() is still running.
+    // Check for connection timeout while connect() is still running.
     if (connecting_async_.load() && connect_timeout_sec_ > 0.0) {
         uint64_t now = Time::get_singleton()->get_ticks_msec();
         double elapsed_sec = (now - connect_start_ms_) / 1000.0;
@@ -354,7 +358,7 @@ void LiveKitRoom::poll_events() {
             emit_signal("connection_failed",
                 String("connection timed out after %s seconds")
                     .replace("%s", String::num(connect_timeout_sec_, 1)));
-            // Swap to a fresh Room so the stuck Connect() thread can't
+            // Swap to a fresh Room so the stuck connect() thread can't
             // produce a ghost connection on the old native Room.
             disconnect_from_room();
             return;
@@ -386,6 +390,9 @@ void LiveKitRoom::disconnect_from_room() {
         disconnect_thread_.detach();
     }
 
+    if (local_participant.is_valid()) {
+        local_participant->unbind();
+    }
     local_participant.unref();
     {
         std::lock_guard<std::mutex> plock(participants_mutex_);
@@ -410,7 +417,7 @@ void LiveKitRoom::disconnect_from_room() {
     room->setDelegate(delegate.get());
 
     // Extract the raw connect thread so the disconnect lambda can wait for
-    // Connect() to finish before deleting the room.
+    // connect() to finish before deleting the room.
     std::thread ct = connect_thread_.release();
 
     // SDK has no explicit disconnect; destroying the Room disconnects.
@@ -440,7 +447,7 @@ String LiveKitRoom::get_sid() const {
     if (connecting_async_.load() || connection_state.load() != STATE_CONNECTED)
         return String();
     if (room) {
-        auto info = room->room_info();
+        auto info = room->roomInfo();
         if (info.sid.has_value()) {
             return String(info.sid.value().c_str());
         }
@@ -452,7 +459,7 @@ String LiveKitRoom::get_name() const {
     if (connecting_async_.load() || connection_state.load() != STATE_CONNECTED)
         return String();
     if (room) {
-        auto info = room->room_info();
+        auto info = room->roomInfo();
         return String(info.name.c_str());
     }
     return String();
@@ -462,7 +469,7 @@ String LiveKitRoom::get_metadata() const {
     if (connecting_async_.load() || connection_state.load() != STATE_CONNECTED)
         return String();
     if (room) {
-        auto info = room->room_info();
+        auto info = room->roomInfo();
         return String(info.metadata.c_str());
     }
     return String();
@@ -519,16 +526,17 @@ Ref<LiveKitParticipant> LiveKitRoom::_find_or_create_participant_by_identity(con
 // Godot wrappers / emits signals.
 
 void LiveKitRoom::GodotRoomDelegate::onParticipantConnected(livekit::Room &r, const livekit::ParticipantConnectedEvent &e) {
-    auto *rp = static_cast<livekit::RemoteParticipant *>(e.participant);
+    // The event only carries a raw pointer, which the main thread may see after the room has freed it.
+    std::string identity(e.participant->identity());
+    std::weak_ptr<livekit::Participant> rp = r.remoteParticipant(identity);
     std::lock_guard<std::mutex> lock(room->event_mutex_);
-    room->pending_events_.push_back([this, rp]() {
+    room->pending_events_.push_back([this, identity, rp]() {
         Ref<LiveKitRemoteParticipant> p;
         p.instantiate();
-        p->bind_participant(rp);
-        p->bind_remote_participant(rp);
+        p->bind_participant(rp, identity);
         {
             std::lock_guard<std::mutex> plock(room->participants_mutex_);
-            room->remote_participants[p->get_identity()] = p;
+            room->remote_participants[String(identity.c_str())] = p;
         }
         room->emit_signal("participant_connected", p);
     });

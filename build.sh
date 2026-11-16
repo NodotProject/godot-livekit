@@ -15,13 +15,24 @@ NC='\033[0m' # No Color
 PLATFORM=""
 ARCH=""
 SCONS_FLAGS=""
-LIVEKIT_VERSION="0.3.1"
+LIVEKIT_VERSION="1.13.1"
+# LiveKit publishes no Android build of the C++ SDK, so Android builds it from the same release with this patch.
+LIVEKIT_ANDROID_PATCH="patches/client-sdk-cpp-android.patch"
+# Cross-compiling the SDK needs a protoc for the build machine that matches its vendored protobuf.
+PROTOC_VERSION="25.3"
+# protoc runs on the build machine, so there's one download per host.
+PROTOC_SHA256_LINUX_X86_64="f853e691868d0557425ea290bf7ba6384eef2fa9b04c323afab49a770ba9da80"
+PROTOC_SHA256_LINUX_AARCH64="9eae1f20f70cccc912d1c318c3929b86aebf5afd4b0f32c196ef682c222ed5ae"
+PROTOC_SHA256_MACOS="c06b6c5527c9b11a30a9c103400ee59eb6882f1766ea786fe4bdbb7f55ee5e6f"
+# webrtc-sys needs NDK r27's libc++.
+MIN_ANDROID_NDK_MAJOR=27
 GODOT_CPP_VERSION="godot-4.5-stable"
 FRAMETAP_VERSION="0.1.3"
 LIVEKIT_JS_VERSION="2.24.0"
 LIVEKIT_JS_SHA256="88b41eb0905a66dd3f46009c9a024aa72503b53398ae9a70c1f60258d246d262"
 SKIP_FRAMETAP=false
 SKIP_LIVEKIT_SDK=false
+BUILD_LIVEKIT_SDK=false
 
 # Verify a downloaded file's SHA-256 hash (if a hash is provided).
 verify_checksum() {
@@ -57,7 +68,7 @@ show_usage() {
     echo "  linux: Build for Linux (x86_64)"
     echo "  macos [arm64|x86_64]: Build for macOS (defaults to host arch)"
     echo "  windows: Build for Windows (x86_64, cross-compile)"
-    echo "  android [arm64]: Build for Android (arm64, requires ANDROID_NDK_ROOT)"
+    echo "  android [arm64|x86_64]: Build for Android (defaults to arm64, requires ANDROID_NDK_ROOT)"
     echo "  web: Build for the web (wasm32, single-threaded, requires emcc from emsdk on PATH)"
     echo "  --debug: Build debug variant (template_debug) instead of release"
     exit 1
@@ -68,8 +79,8 @@ setup_linux() {
     PLATFORM="linux"
     ARCH="x86_64"
     SCONS_FLAGS="platform=linux arch=x86_64"
-    LIVEKIT_ARCHIVE="livekit-sdk-linux-x64-${LIVEKIT_VERSION}.tar.gz"
-    LIVEKIT_URL="https://github.com/krazyjakee/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
+    LIVEKIT_ARCHIVE="livekit-sdk-ubuntu-22.04-x64-${LIVEKIT_VERSION}.tar.gz"
+    LIVEKIT_URL="https://github.com/livekit/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
     echo -e "${BLUE}=== Godot-LiveKit Local Build Script (Linux) ===${NC}"
 }
 
@@ -89,7 +100,7 @@ setup_macos() {
     local sdk_arch="arm64"
     [ "$ARCH" = "x86_64" ] && sdk_arch="x64"
     LIVEKIT_ARCHIVE="livekit-sdk-macos-${sdk_arch}-${LIVEKIT_VERSION}.tar.gz"
-    LIVEKIT_URL="https://github.com/krazyjakee/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
+    LIVEKIT_URL="https://github.com/livekit/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
     echo -e "${BLUE}=== Godot-LiveKit Local Build Script (macOS ${ARCH}) ===${NC}"
 }
 
@@ -98,18 +109,17 @@ setup_windows() {
     ARCH="x86_64"
     SCONS_FLAGS="platform=windows arch=x86_64"
     LIVEKIT_ARCHIVE="livekit-sdk-windows-x64-${LIVEKIT_VERSION}.zip"
-    LIVEKIT_URL="https://github.com/krazyjakee/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
+    LIVEKIT_URL="https://github.com/livekit/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
     echo -e "${BLUE}=== Godot-LiveKit Local Build Script (Windows Native) ===${NC}"
 }
 
 setup_android() {
     PLATFORM="android"
-    ARCH="arm64"
-    SCONS_FLAGS="platform=android arch=arm64 screen_capture=no"
-    LIVEKIT_ARCHIVE="livekit-sdk-android-arm64-${LIVEKIT_VERSION}.tar.gz"
-    LIVEKIT_URL="https://github.com/krazyjakee/client-sdk-cpp/releases/download/v${LIVEKIT_VERSION}/${LIVEKIT_ARCHIVE}"
+    ARCH="${1:-arm64}"
+    SCONS_FLAGS="platform=android arch=${ARCH} screen_capture=no"
+    BUILD_LIVEKIT_SDK=true
     SKIP_FRAMETAP=true
-    echo -e "${BLUE}=== Godot-LiveKit Local Build Script (Android arm64) ===${NC}"
+    echo -e "${BLUE}=== Godot-LiveKit Local Build Script (Android ${ARCH}) ===${NC}"
 }
 
 setup_web() {
@@ -130,6 +140,12 @@ check_godotcpp_cache() {
 
     if [ ! -d "godot-cpp/bin" ] || [ ! -d "godot-cpp/include" ] || [ ! -d "godot-cpp/gen" ]; then
         echo -e "${RED}Cache miss: godot-cpp prebuilt not found${NC}"
+        return 1
+    fi
+
+    # A build for another architecture or target doesn't have the library this build links.
+    if [ -n "$ARCH" ] && ! ls godot-cpp/bin/*godot-cpp.${PLATFORM}.${BUILD_TARGET}*.${ARCH}.* &> /dev/null; then
+        echo -e "${RED}Cache miss: godot-cpp not built for ${PLATFORM} ${ARCH} (${BUILD_TARGET})${NC}"
         return 1
     fi
 
@@ -218,10 +234,74 @@ fetch_livekit() {
         fi
     fi
 
-    local version_key="$LIVEKIT_VERSION"
-    [ "$PLATFORM" == "macos" ] && version_key="${LIVEKIT_VERSION}-${ARCH}"
-    echo "$version_key" > livekit-sdk/.version
+    livekit_version_key > livekit-sdk/.version
     echo -e "${GREEN}LiveKit SDK downloaded and extracted successfully!${NC}"
+}
+
+# Function to build the LiveKit C++ SDK for Android from its release, with our Android patch
+build_livekit_android() {
+    echo -e "${YELLOW}Building LiveKit C++ SDK ${LIVEKIT_VERSION} for Android (${ARCH})...${NC}"
+    local ndk_root="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
+    local work_dir="$(pwd)/livekit-sdk-build"
+    local src_dir="${work_dir}/client-sdk-cpp"
+    local android_abi="arm64-v8a"
+    local rust_target="aarch64-linux-android"
+    if [ "$ARCH" = "x86_64" ]; then
+        android_abi="x86_64"
+        rust_target="x86_64-linux-android"
+    fi
+
+    rm -rf livekit-sdk "$work_dir"
+    mkdir -p "$work_dir"
+    git clone --quiet --depth 1 --branch "v${LIVEKIT_VERSION}" --recurse-submodules --shallow-submodules \
+        https://github.com/livekit/client-sdk-cpp.git "$src_dir"
+    git -C "$src_dir" apply "$(pwd)/${LIVEKIT_ANDROID_PATCH}"
+
+    local protoc_host protoc_sha256
+    case "$(uname -s)-$(uname -m)" in
+        Linux-x86_64) protoc_host="linux-x86_64"; protoc_sha256="$PROTOC_SHA256_LINUX_X86_64" ;;
+        Linux-aarch64 | Linux-arm64) protoc_host="linux-aarch_64"; protoc_sha256="$PROTOC_SHA256_LINUX_AARCH64" ;;
+        Darwin-*) protoc_host="osx-universal_binary"; protoc_sha256="$PROTOC_SHA256_MACOS" ;;
+        *)
+            echo -e "${RED}Building the LiveKit SDK for Android isn't supported on $(uname -s) $(uname -m)${NC}"
+            exit 1
+            ;;
+    esac
+    local protoc_zip="${work_dir}/protoc.zip"
+    curl -sL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${protoc_host}.zip" \
+        -o "$protoc_zip"
+    verify_checksum "$protoc_zip" "$protoc_sha256"
+    unzip -q "$protoc_zip" -d "${work_dir}/protoc"
+
+    # The SDK pins its Rust release in client-sdk-rust, so add the target to that toolchain.
+    (cd "${src_dir}/client-sdk-rust" && rustup target add "$rust_target")
+
+    # The SDK reports errors by throwing, and the extension can only catch them if both share one C++ runtime.
+    # With the NDK's default static runtime, each library gets its own exception types, and the app aborts instead.
+    cmake -S "$src_dir" -B "${work_dir}/build" -G Ninja \
+        -DCMAKE_TOOLCHAIN_FILE="${ndk_root}/build/cmake/android.toolchain.cmake" \
+        -DANDROID_ABI="$android_abi" \
+        -DANDROID_PLATFORM=android-24 \
+        -DANDROID_STL=c++_shared \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLIVEKIT_VERSION="$LIVEKIT_VERSION" \
+        -DProtobuf_PROTOC_EXECUTABLE="${work_dir}/protoc/bin/protoc"
+    cmake --build "${work_dir}/build" -j "$(getconf _NPROCESSORS_ONLN)"
+    cmake --install "${work_dir}/build" --prefix "$(pwd)/livekit-sdk"
+    # Apps also need WebRTC's Java classes, which come with the WebRTC build that the SDK's build downloads.
+    local webrtc_jar
+    # The SDK's build puts Cargo's output in CARGO_TARGET_DIR when it's set, relative to client-sdk-rust.
+    webrtc_jar=$(cd "${src_dir}/client-sdk-rust" && find "$(cd "${CARGO_TARGET_DIR:-target}" && pwd)" -path "*/out/livekit_webrtc/*" -name libwebrtc.jar | head -1)
+    if [ -z "$webrtc_jar" ]; then
+        echo -e "${RED}libwebrtc.jar not found in the LiveKit SDK build${NC}"
+        exit 1
+    fi
+    mkdir -p livekit-sdk/java
+    cp "$webrtc_jar" livekit-sdk/java/
+
+    livekit_version_key > livekit-sdk/.version
+    rm -rf "$work_dir"
+    echo -e "${GREEN}LiveKit SDK built successfully!${NC}"
 }
 
 # Function to download livekit-client, which the web build embeds
@@ -310,9 +390,7 @@ check_livekit_cache() {
         return 1
     fi
 
-    local version_key="$LIVEKIT_VERSION"
-    [ "$PLATFORM" == "macos" ] && version_key="${LIVEKIT_VERSION}-${ARCH}"
-    if [ -f "livekit-sdk/.version" ] && [ "$(cat livekit-sdk/.version)" = "$version_key" ]; then
+    if [ -f "livekit-sdk/.version" ] && [ "$(cat livekit-sdk/.version)" = "$(livekit_version_key)" ]; then
         echo -e "${GREEN}livekit SDK cache is valid!${NC}"
         return 0
     fi
@@ -401,8 +479,15 @@ install_dependencies() {
             echo -e "${RED}ANDROID_NDK_ROOT or ANDROID_NDK_HOME must be set and point to a valid NDK installation${NC}"
             exit 1
         fi
+        local ndk_major
+        ndk_major=$(sed -n 's/^Pkg.Revision *= *\([0-9]*\).*/\1/p' "${ndk_root}/source.properties" 2>/dev/null)
+        if [ -z "$ndk_major" ] || [ "$ndk_major" -lt "$MIN_ANDROID_NDK_MAJOR" ]; then
+            echo -e "${RED}Android builds need NDK r${MIN_ANDROID_NDK_MAJOR} or newer, but ${ndk_root} is ${ndk_major:-unknown}${NC}"
+            exit 1
+        fi
 
-        local required_tools=("scons" "curl" "tar")
+        # Building the LiveKit SDK also needs git, CMake, Ninja and Rust (rustup).
+        local required_tools=("scons" "curl" "tar" "unzip" "git" "cmake" "ninja" "rustup" "cargo")
         local missing_tools=()
 
         for tool in "${required_tools[@]}"; do
@@ -429,7 +514,7 @@ build_main_project() {
     # Copy shared libraries next to the Godot GDExtension library so they can be loaded
     echo -e "${YELLOW}Copying LiveKit shared libraries to bin...${NC}"
     if [ "$PLATFORM" == "android" ]; then
-        local dep_dir="addons/godot-livekit/bin/android-arm64"
+        local dep_dir="addons/godot-livekit/bin/android-${ARCH}"
         mkdir -p "$dep_dir"
         cp livekit-sdk/lib/*.so "$dep_dir/" || true
     elif [ "$PLATFORM" == "web" ]; then
@@ -453,6 +538,18 @@ build_main_project() {
                 install_name_tool -change "$bad_path" "@rpath/liblivekit_ffi.dylib" "$dylib"
             done
         done
+    fi
+}
+
+# Prints the key that identifies the LiveKit SDK build in livekit-sdk/.version.
+livekit_version_key() {
+    if [ "$PLATFORM" == "macos" ]; then
+        echo "${LIVEKIT_VERSION}-${ARCH}"
+    elif [ "$BUILD_LIVEKIT_SDK" = true ]; then
+        # A changed patch needs a rebuild.
+        echo "${LIVEKIT_VERSION}-${ARCH}-$(git hash-object "$LIVEKIT_ANDROID_PATCH" | cut -c1-12)"
+    else
+        echo "$LIVEKIT_VERSION"
     fi
 }
 
@@ -497,7 +594,7 @@ main() {
             setup_windows
             ;;
         android)
-            setup_android
+            setup_android "$arch_arg"
             ;;
         web)
             setup_web
@@ -519,10 +616,12 @@ main() {
 
     if [ "$SKIP_LIVEKIT_SDK" = true ]; then
         fetch_livekit_js
-    elif ! check_livekit_cache; then
-        fetch_livekit
-    else
+    elif check_livekit_cache; then
         echo -e "${GREEN}Using cached livekit SDK${NC}"
+    elif [ "$BUILD_LIVEKIT_SDK" = true ]; then
+        build_livekit_android
+    else
+        fetch_livekit
     fi
 
     if ! check_godotcpp_cache; then

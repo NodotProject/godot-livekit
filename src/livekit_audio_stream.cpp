@@ -19,9 +19,7 @@ void LiveKitAudioStream::_bind_methods() {
     ADD_PROPERTY(PropertyInfo(Variant::INT, "num_channels"), "", "get_num_channels");
 }
 
-LiveKitAudioStream::LiveKitAudioStream() {
-    ring_.resize(kMaxAudioBufferSamples, 0.0f);
-}
+LiveKitAudioStream::LiveKitAudioStream() {}
 
 LiveKitAudioStream::~LiveKitAudioStream() {
     alive_->store(false);
@@ -46,10 +44,10 @@ void LiveKitAudioStream::_reader_loop() {
 
         const auto &frame = event.frame;
         const auto &pcm_data = frame.data();
-        int channels = frame.num_channels();
+        int channels = frame.numChannels();
 
         // Update sample rate/channels from actual frame data
-        sample_rate_ = frame.sample_rate();
+        sample_rate_ = frame.sampleRate();
         num_channels_ = channels;
 
         // Convert int16 interleaved PCM to float32 using persistent buffer.
@@ -94,6 +92,8 @@ Ref<LiveKitAudioStream> LiveKitAudioStream::from_track(const Ref<LiveKitTrack> &
     Ref<LiveKitAudioStream> stream;
     stream.instantiate();
     stream->stream_ = native_stream;
+    // Allocated here rather than in the constructor, since only streams that read need it.
+    stream->ring_.resize(kMaxAudioBufferSamples, 0.0f);
     stream->running_.store(true);
     // Capture the alive sentinel so the thread can detect if the object is freed.
     auto alive = stream->alive_;
@@ -105,7 +105,8 @@ Ref<LiveKitAudioStream> LiveKitAudioStream::from_track(const Ref<LiveKitTrack> &
 }
 
 Ref<LiveKitAudioStream> LiveKitAudioStream::from_participant(const Ref<LiveKitRemoteParticipant> &participant, int source) {
-    if (participant.is_null() || !participant->get_native_remote_participant()) {
+    auto native_participant = participant.is_valid() ? participant->get_native_remote_participant() : nullptr;
+    if (!native_participant) {
         UtilityFunctions::push_error("LiveKitAudioStream::from_participant: invalid participant");
         return Ref<LiveKitAudioStream>();
     }
@@ -113,7 +114,7 @@ Ref<LiveKitAudioStream> LiveKitAudioStream::from_participant(const Ref<LiveKitRe
     livekit::AudioStream::Options opts;
 
     auto native_stream = livekit::AudioStream::fromParticipant(
-            *participant->get_native_remote_participant(),
+            *native_participant,
             (livekit::TrackSource)source,
             opts);
     if (!native_stream) {
@@ -124,6 +125,8 @@ Ref<LiveKitAudioStream> LiveKitAudioStream::from_participant(const Ref<LiveKitRe
     Ref<LiveKitAudioStream> stream;
     stream.instantiate();
     stream->stream_ = native_stream;
+    // Allocated here rather than in the constructor, since only streams that read need it.
+    stream->ring_.resize(kMaxAudioBufferSamples, 0.0f);
     stream->running_.store(true);
     auto alive = stream->alive_;
     stream->reader_thread_.start([raw = stream.ptr(), alive]() {
@@ -151,7 +154,8 @@ int LiveKitAudioStream::poll(const Ref<AudioStreamGeneratorPlayback> &playback) 
         std::unique_lock<std::mutex> lock(audio_mutex_, std::try_to_lock);
         if (!lock.owns_lock()) {
             uint32_t count = lock_contention_count_.fetch_add(1) + 1;
-            if (count == 1 || (count % 100) == 0) {
+            // An occasional skipped poll is harmless, since the next one picks up what the reader added.
+            if ((count % 100) == 0) {
                 UtilityFunctions::push_warning("LiveKitAudioStream::poll: lock contention (", count, " skipped frames)");
             }
             return 0;

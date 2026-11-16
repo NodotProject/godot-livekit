@@ -51,16 +51,26 @@ jobs:
 
     - name: Set up Android NDK
       if: matrix.platform == 'android'
+      id: setup-ndk
       uses: nttld/setup-ndk@v1
       with:
-        ndk-version: r26d
+        ndk-version: r27d
+
+    - name: Export NDK path
+      if: matrix.platform == 'android'
+      run: echo "ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
+
+    - name: Install Android SDK build dependencies
+      if: matrix.platform == 'android'
+      run: sudo apt-get update && sudo apt-get install -y ninja-build
 
     - name: Cache dependencies
       uses: actions/cache@v4
       with:
         path: |
           godot-cpp
-        key: deps-${{ matrix.platform }}-${{ matrix.arch || matrix.platform }}-${{ hashFiles('build.sh') }}
+          livekit-sdk
+        key: deps-${{ matrix.platform }}-${{ matrix.arch || matrix.platform }}-${{ hashFiles('build.sh', 'patches/**') }}
 
     - name: Build GDExtension
       shell: bash
@@ -180,22 +190,131 @@ jobs:
 
     - name: Run tests
       run: |
-        # Join tokens for the integration tests, signed with the dev server's key.
-        token() {
-          python3 - "$1" <<'PY'
-        import base64, hashlib, hmac, json, sys, time
-        def b64(b): return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
-        now = int(time.time())
-        claims = {"iss": "devkey", "sub": sys.argv[1], "iat": now, "nbf": now, "exp": now + 3600,
-                  "video": {"room": "web-integration", "roomJoin": True, "canPublish": True,
-                            "canSubscribe": True, "canPublishData": True}}
-        signing = b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()) + "." + b64(json.dumps(claims).encode())
-        print(signing + "." + b64(hmac.new(b"secret", signing.encode(), hashlib.sha256).digest()))
-        PY
-        }
         export LIVEKIT_TEST_URL=ws://127.0.0.1:7880
-        export LIVEKIT_TOKEN_1=$(token web-user-1)
-        export LIVEKIT_TOKEN_2=$(token web-user-2)
+        export LIVEKIT_TOKEN_1=$(python3 test/dev_token.py web-user-1 web-integration)
+        export LIVEKIT_TOKEN_2=$(python3 test/dev_token.py web-user-2 web-integration)
         export RUN_E2E=1
         export LIVEKIT_E2E_URL=ws://127.0.0.1:7880
         ./test_web.sh
+
+  android:
+    name: Test on Android (x86_64 emulator)
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: "4.5.2"
+      LIVEKIT_SERVER_VERSION: "1.13.7"
+      # The emulator reaches the host's localhost at 10.0.2.2.
+      LIVEKIT_TEST_URL: ws://10.0.2.2:7880
+      LIVEKIT_E2E_URL: ws://10.0.2.2:7880
+      RUN_E2E: "1"
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.x"
+
+    - name: Install SCons
+      run: pip install scons
+
+    - name: Set up Android NDK
+      id: setup-ndk
+      uses: nttld/setup-ndk@v1
+      with:
+        ndk-version: r27d
+
+    - name: Export NDK path
+      run: echo "ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
+
+    - name: Install Android SDK build dependencies
+      run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+    - name: Cache dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          godot-cpp
+          livekit-sdk
+        key: deps-android-x86_64-${{ hashFiles('build.sh', 'patches/**') }}
+
+    # x86_64, since GitHub's runners can only emulate their own architecture at a usable speed.
+    - name: Build GDExtension
+      run: ./build.sh android x86_64
+
+    - name: Set up Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: "17"
+
+    - name: Cache Godot and export templates
+      id: cache-godot
+      uses: actions/cache@v4
+      with:
+        path: |
+          godot
+          ~/.local/share/godot/export_templates
+        key: godot-${{ env.GODOT_VERSION }}-android-templates
+
+    - name: Download Godot and Android export templates
+      if: steps.cache-godot.outputs.cache-hit != 'true'
+      run: |
+        wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+        unzip -q Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+        mv Godot_v${GODOT_VERSION}-stable_linux.x86_64 godot
+        chmod +x godot
+        wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+        templates=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+        mkdir -p "$templates"
+        unzip -q -j Godot_v${GODOT_VERSION}-stable_export_templates.tpz 'templates/android_*' 'templates/version.txt' -d "$templates"
+
+    - name: Cache Gradle
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: gradle-godot-${{ env.GODOT_VERSION }}
+
+    - name: Install GUT
+      run: |
+        git clone --depth 1 --branch v9.5.0 https://github.com/bitwes/Gut.git /tmp/gut
+        mkdir -p addons
+        cp -r /tmp/gut/addons/gut addons/gut
+
+    - name: Start LiveKit server
+      run: |
+        wget -q https://github.com/livekit/livekit/releases/download/v${LIVEKIT_SERVER_VERSION}/livekit_${LIVEKIT_SERVER_VERSION}_linux_amd64.tar.gz
+        tar -xzf livekit_${LIVEKIT_SERVER_VERSION}_linux_amd64.tar.gz livekit-server
+        ./livekit-server --dev > livekit-server.log 2>&1 &
+
+    - name: Create join tokens
+      run: |
+        echo "LIVEKIT_TOKEN_1=$(python3 test/dev_token.py android-user-1 android-integration)" >> "$GITHUB_ENV"
+        echo "LIVEKIT_TOKEN_2=$(python3 test/dev_token.py android-user-2 android-integration)" >> "$GITHUB_ENV"
+
+    # Before starting the emulator, since both need a lot of CPU.
+    - name: Export test app
+      run: ./test_android.sh --export-only build/android-tests.apk --arch x86_64
+
+    - name: Enable KVM
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+
+    - name: Run tests
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: 34
+        target: google_apis
+        arch: x86_64
+        cores: 4
+        ram-size: 4096M
+        # The action's defaults, but with audio, which the tests play.
+        emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim
+        disable-animations: true
+        script: ./test_android.sh --apk build/android-tests.apk
