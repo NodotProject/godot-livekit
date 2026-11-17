@@ -126,6 +126,37 @@ check_bundled_frameworks() {
     fi
 }
 
+# The simulator's background work after booting can take most of the host's CPU, enough to time
+# out e2e tests, so wait (within a limit) for it to settle before running them.
+wait_for_idle_cpu() {
+    local deadline=$((SECONDS + ${IOS_SETTLE_TIMEOUT_SEC:-300})) idle
+    while [ $SECONDS -lt $deadline ]; do
+        # top's first sample is an average since boot, so read its second.
+        idle=$(top -l 2 -s 5 -n 0 | awk '/^CPU usage/ {v = $(NF - 1)} END {sub(/%/, "", v); print int(v)}')
+        [ "${idle:-0}" -ge 50 ] && return 0
+        echo "Waiting for the host's CPU to settle (${idle}% idle)..."
+    done
+    echo -e "${YELLOW}The host's CPU is still busy. Running the tests anyway.${NC}"
+}
+
+# A newly booted simulator spends a minute or two on background work, so boot it before exporting.
+if [ "$BUILD_FOR_DEVICE" = false ]; then
+    DEVICE="${IOS_SIMULATOR_UDID:-}"
+    if [ -z "$DEVICE" ]; then
+        read -r runtime device_type < <(xcrun simctl list runtimes -j | python3 -c 'import json,sys
+r = [x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and x["platform"] == "iOS"]
+t = [d["identifier"] for d in r[-1]["supportedDeviceTypes"] if d["name"].startswith("iPhone")] if r else []
+print(r[-1]["identifier"], t[-1]) if t else print()') || true
+        if [ -z "${runtime:-}" ] || [ -z "${device_type:-}" ]; then
+            echo -e "${RED}No iOS simulator runtime found. Install one with Xcode.${NC}"
+            exit 1
+        fi
+        DEVICE=$(xcrun simctl create "LiveKit Tests" "$device_type" "$runtime")
+        CREATED_DEVICE=true
+    fi
+    xcrun simctl boot "$DEVICE" >/dev/null 2>&1 || true
+fi
+
 if [ -f export_presets.cfg ]; then
     cp export_presets.cfg "$WORK_DIR/export_presets.cfg"
     HAD_PRESETS=true
@@ -202,21 +233,8 @@ if ! xcodebuild -project "$WORK_DIR/xcode/${APP_NAME}.xcodeproj" -scheme "$APP_N
 fi
 app="$WORK_DIR/derived/Build/Products/Debug-iphonesimulator/${APP_NAME}.app"
 
-DEVICE="${IOS_SIMULATOR_UDID:-}"
-if [ -z "$DEVICE" ]; then
-    read -r runtime device_type < <(xcrun simctl list runtimes -j | python3 -c 'import json,sys
-r = [x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and x["platform"] == "iOS"]
-t = [d["identifier"] for d in r[-1]["supportedDeviceTypes"] if d["name"].startswith("iPhone")] if r else []
-print(r[-1]["identifier"], t[-1]) if t else print()') || true
-    if [ -z "${runtime:-}" ] || [ -z "${device_type:-}" ]; then
-        echo -e "${RED}No iOS simulator runtime found. Install one with Xcode.${NC}"
-        exit 1
-    fi
-    DEVICE=$(xcrun simctl create "LiveKit Tests" "$device_type" "$runtime")
-    CREATED_DEVICE=true
-fi
-xcrun simctl boot "$DEVICE" >/dev/null 2>&1 || true
 $TIMEOUT_CMD 600 xcrun simctl bootstatus "$DEVICE" -b >/dev/null
+wait_for_idle_cpu
 
 xcrun simctl install "$DEVICE" "$app"
 xcrun simctl privacy "$DEVICE" grant microphone "$BUNDLE_ID" || true
