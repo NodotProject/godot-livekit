@@ -16,8 +16,10 @@ PLATFORM=""
 ARCH=""
 SCONS_FLAGS=""
 LIVEKIT_VERSION="1.13.1"
-# LiveKit publishes no Android build of the C++ SDK, so Android builds it from the same release with this patch.
-LIVEKIT_ANDROID_PATCH="patches/client-sdk-cpp-android.patch"
+# Where the LiveKit SDK goes. iOS has one per slice (device or simulator).
+LIVEKIT_SDK_DIR="livekit-sdk"
+# LiveKit publishes no Android or iOS build of the C++ SDK, so those build it from the same release with this patch.
+LIVEKIT_MOBILE_PATCH="patches/client-sdk-cpp-mobile.patch"
 # Cross-compiling the SDK needs a protoc for the build machine that matches its vendored protobuf.
 PROTOC_VERSION="25.3"
 # protoc runs on the build machine, so there's one download per host.
@@ -26,6 +28,9 @@ PROTOC_SHA256_LINUX_AARCH64="9eae1f20f70cccc912d1c318c3929b86aebf5afd4b0f32c196e
 PROTOC_SHA256_MACOS="c06b6c5527c9b11a30a9c103400ee59eb6882f1766ea786fe4bdbb7f55ee5e6f"
 # webrtc-sys needs NDK r27's libc++.
 MIN_ANDROID_NDK_MAJOR=27
+# Godot 4.5's iOS export templates need iOS 14.
+IOS_MIN_VERSION="14.0"
+IOS_SIMULATOR=false
 GODOT_CPP_VERSION="godot-4.5-stable"
 FRAMETAP_VERSION="0.1.3"
 LIVEKIT_JS_VERSION="2.24.0"
@@ -64,11 +69,12 @@ verify_checksum() {
 BUILD_TARGET="template_release"
 
 show_usage() {
-    echo -e "${YELLOW}Usage: $0 [linux|macos|windows|android] [arm64|x86_64] [--debug]${NC}"
+    echo -e "${YELLOW}Usage: $0 [linux|macos|windows|android|ios|web] [arm64|x86_64] [--simulator] [--debug]${NC}"
     echo "  linux: Build for Linux (x86_64)"
     echo "  macos [arm64|x86_64]: Build for macOS (defaults to host arch)"
     echo "  windows: Build for Windows (x86_64, cross-compile)"
     echo "  android [arm64|x86_64]: Build for Android (defaults to arm64, requires ANDROID_NDK_ROOT)"
+    echo "  ios [--simulator]: Build for iOS devices or the iOS simulator (arm64, requires Xcode)"
     echo "  web: Build for the web (wasm32, single-threaded, requires emcc from emsdk on PATH)"
     echo "  --debug: Build debug variant (template_debug) instead of release"
     exit 1
@@ -122,6 +128,18 @@ setup_android() {
     echo -e "${BLUE}=== Godot-LiveKit Local Build Script (Android ${ARCH}) ===${NC}"
 }
 
+setup_ios() {
+    PLATFORM="ios"
+    ARCH="arm64"
+    local slice="ios-${ARCH}"
+    [ "$IOS_SIMULATOR" = true ] && slice="${slice}-simulator"
+    LIVEKIT_SDK_DIR="livekit-sdk-${slice}"
+    SCONS_FLAGS="platform=ios arch=${ARCH} ios_simulator=$([ "$IOS_SIMULATOR" = true ] && echo yes || echo no) ios_min_version=${IOS_MIN_VERSION} livekit_sdk=${LIVEKIT_SDK_DIR} screen_capture=no"
+    BUILD_LIVEKIT_SDK=true
+    SKIP_FRAMETAP=true
+    echo -e "${BLUE}=== Godot-LiveKit Local Build Script (${slice}) ===${NC}"
+}
+
 setup_web() {
     PLATFORM="web"
     ARCH="wasm32"
@@ -144,7 +162,12 @@ check_godotcpp_cache() {
     fi
 
     # A build for another architecture or target doesn't have the library this build links.
-    if [ -n "$ARCH" ] && ! ls godot-cpp/bin/*godot-cpp.${PLATFORM}.${BUILD_TARGET}*.${ARCH}.* &> /dev/null; then
+    local gcpp_lib="godot-cpp/bin/*godot-cpp.${PLATFORM}.${BUILD_TARGET}*.${ARCH}.*"
+    if [ "$PLATFORM" == "ios" ]; then
+        # The device library's name is the simulator library's, minus .simulator.
+        gcpp_lib="godot-cpp/bin/libgodot-cpp.ios.${BUILD_TARGET}.${ARCH}$([ "$IOS_SIMULATOR" = true ] && echo .simulator).a"
+    fi
+    if [ -n "$ARCH" ] && ! ls $gcpp_lib &> /dev/null; then
         echo -e "${RED}Cache miss: godot-cpp not built for ${PLATFORM} ${ARCH} (${BUILD_TARGET})${NC}"
         return 1
     fi
@@ -168,9 +191,14 @@ check_godotcpp_cache() {
 fetch_godotcpp() {
     echo -e "${YELLOW}Building godot-cpp from source (${GODOT_CPP_VERSION}, target=${BUILD_TARGET})...${NC}"
 
-    rm -rf godot-cpp
-    git clone --depth 1 --branch "${GODOT_CPP_VERSION}" \
-        https://github.com/godotengine/godot-cpp.git godot-cpp
+    # Each platform's library has its own name, so builds for several platforms can share a clone. But
+    # the generated bindings depend on pointer size, so web (32-bit) builds can't share with the others.
+    if [ ! -f godot-cpp/.version ] || [ "$(cat godot-cpp/.version)" != "$GODOT_CPP_VERSION" ] \
+        || [ "$PLATFORM" == "web" ] || ls godot-cpp/bin/*.web.* &> /dev/null; then
+        rm -rf godot-cpp
+        git clone --depth 1 --branch "${GODOT_CPP_VERSION}" \
+            https://github.com/godotengine/godot-cpp.git godot-cpp
+    fi
 
     local gcpp_flags="platform=${PLATFORM} target=${BUILD_TARGET}"
     if [ -n "$ARCH" ]; then
@@ -178,6 +206,10 @@ fetch_godotcpp() {
     fi
     if [ "$PLATFORM" == "web" ]; then
         gcpp_flags="$gcpp_flags threads=no"
+    fi
+    if [ "$PLATFORM" == "ios" ]; then
+        gcpp_flags="$gcpp_flags ios_min_version=${IOS_MIN_VERSION}"
+        [ "$IOS_SIMULATOR" = true ] && gcpp_flags="$gcpp_flags ios_simulator=yes"
     fi
     if [ "$PLATFORM" == "android" ]; then
         export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
@@ -197,29 +229,29 @@ fetch_godotcpp() {
 fetch_livekit() {
     echo -e "${YELLOW}Fetching LiveKit C++ SDK for ${PLATFORM} (${ARCH})...${NC}"
 
-    rm -rf livekit-sdk
-    mkdir -p livekit-sdk
+    rm -rf ${LIVEKIT_SDK_DIR}
+    mkdir -p ${LIVEKIT_SDK_DIR}
     
     echo -e "${YELLOW}Downloading ${LIVEKIT_URL}...${NC}"
     curl -sL "${LIVEKIT_URL}" -o "${LIVEKIT_ARCHIVE}"
     
     echo -e "${YELLOW}Extracting...${NC}"
     if [[ "$LIVEKIT_ARCHIVE" == *.zip ]]; then
-        unzip -q "${LIVEKIT_ARCHIVE}" -d livekit-sdk
+        unzip -q "${LIVEKIT_ARCHIVE}" -d ${LIVEKIT_SDK_DIR}
         local inner_dir=$(ls livekit-sdk)
-        if [ -d "livekit-sdk/${inner_dir}/include" ]; then
-            mv livekit-sdk/${inner_dir}/* livekit-sdk/
-            rm -rf livekit-sdk/${inner_dir}
+        if [ -d "${LIVEKIT_SDK_DIR}/${inner_dir}/include" ]; then
+            mv ${LIVEKIT_SDK_DIR}/${inner_dir}/* ${LIVEKIT_SDK_DIR}/
+            rm -rf ${LIVEKIT_SDK_DIR}/${inner_dir}
         fi
     else
-        tar -xzf "${LIVEKIT_ARCHIVE}" -C livekit-sdk --strip-components=1
+        tar -xzf "${LIVEKIT_ARCHIVE}" -C ${LIVEKIT_SDK_DIR} --strip-components=1
     fi
     
     rm "${LIVEKIT_ARCHIVE}"
 
     # Patch: local_participant.h uses std::vector<ParticipantTrackPermission> in a default
     # parameter but only forward-declares the type. Include track.h for the full definition.
-    local lp_header="livekit-sdk/include/livekit/local_participant.h"
+    local lp_header="${LIVEKIT_SDK_DIR}/include/livekit/local_participant.h"
     if [ -f "$lp_header" ] && ! grep -q '#include "livekit/track.h"' "$lp_header"; then
         echo -e "${YELLOW}Patching local_participant.h (incomplete type fix)...${NC}"
         sed -i.bak 's|#include "livekit/participant.h"|#include "livekit/participant.h"\
@@ -234,28 +266,57 @@ fetch_livekit() {
         fi
     fi
 
-    livekit_version_key > livekit-sdk/.version
+    livekit_version_key > ${LIVEKIT_SDK_DIR}/.version
     echo -e "${GREEN}LiveKit SDK downloaded and extracted successfully!${NC}"
 }
 
-# Function to build the LiveKit C++ SDK for Android from its release, with our Android patch
-build_livekit_android() {
-    echo -e "${YELLOW}Building LiveKit C++ SDK ${LIVEKIT_VERSION} for Android (${ARCH})...${NC}"
-    local ndk_root="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
+# Function to build the LiveKit C++ SDK for Android or iOS from its release, with our patch
+build_livekit_sdk() {
+    echo -e "${YELLOW}Building LiveKit C++ SDK ${LIVEKIT_VERSION} for ${PLATFORM} (${ARCH})...${NC}"
     local work_dir="$(pwd)/livekit-sdk-build"
     local src_dir="${work_dir}/client-sdk-cpp"
-    local android_abi="arm64-v8a"
-    local rust_target="aarch64-linux-android"
-    if [ "$ARCH" = "x86_64" ]; then
-        android_abi="x86_64"
-        rust_target="x86_64-linux-android"
+    local rust_target
+    local platform_args=()
+    if [ "$PLATFORM" == "android" ]; then
+        local ndk_root="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
+        local android_abi="arm64-v8a"
+        rust_target="aarch64-linux-android"
+        if [ "$ARCH" = "x86_64" ]; then
+            android_abi="x86_64"
+            rust_target="x86_64-linux-android"
+        fi
+        # The SDK reports errors by throwing, and the extension can only catch them if both share one C++ runtime.
+        # With the NDK's default static runtime, each library gets its own exception types, and the app aborts instead.
+        platform_args=(
+            -DCMAKE_TOOLCHAIN_FILE="${ndk_root}/build/cmake/android.toolchain.cmake"
+            -DANDROID_ABI="$android_abi"
+            -DANDROID_PLATFORM=android-24
+            -DANDROID_STL=c++_shared
+        )
+    else
+        local ios_sdk="iphoneos"
+        rust_target="aarch64-apple-ios"
+        if [ "$IOS_SIMULATOR" = true ]; then
+            ios_sdk="iphonesimulator"
+            rust_target="aarch64-apple-ios-sim"
+        fi
+        platform_args=(
+            -DCMAKE_SYSTEM_NAME=iOS
+            # Cross-compiling leaves it unset, and abseil then picks x86 compiler flags.
+            -DCMAKE_SYSTEM_PROCESSOR="$ARCH"
+            -DCMAKE_OSX_SYSROOT="$ios_sdk"
+            -DCMAKE_OSX_ARCHITECTURES="$ARCH"
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="$IOS_MIN_VERSION"
+        )
+        # Cargo builds the FFI, and Rust takes the minimum iOS version from the environment.
+        export IPHONEOS_DEPLOYMENT_TARGET="$IOS_MIN_VERSION"
     fi
 
-    rm -rf livekit-sdk "$work_dir"
+    rm -rf "${LIVEKIT_SDK_DIR}" "$work_dir"
     mkdir -p "$work_dir"
     git clone --quiet --depth 1 --branch "v${LIVEKIT_VERSION}" --recurse-submodules --shallow-submodules \
         https://github.com/livekit/client-sdk-cpp.git "$src_dir"
-    git -C "$src_dir" apply "$(pwd)/${LIVEKIT_ANDROID_PATCH}"
+    git -C "$src_dir" apply "$(pwd)/${LIVEKIT_MOBILE_PATCH}"
 
     local protoc_host protoc_sha256
     case "$(uname -s)-$(uname -m)" in
@@ -263,7 +324,7 @@ build_livekit_android() {
         Linux-aarch64 | Linux-arm64) protoc_host="linux-aarch_64"; protoc_sha256="$PROTOC_SHA256_LINUX_AARCH64" ;;
         Darwin-*) protoc_host="osx-universal_binary"; protoc_sha256="$PROTOC_SHA256_MACOS" ;;
         *)
-            echo -e "${RED}Building the LiveKit SDK for Android isn't supported on $(uname -s) $(uname -m)${NC}"
+            echo -e "${RED}Building the LiveKit SDK for ${PLATFORM} isn't supported on $(uname -s) $(uname -m)${NC}"
             exit 1
             ;;
     esac
@@ -276,30 +337,27 @@ build_livekit_android() {
     # The SDK pins its Rust release in client-sdk-rust, so add the target to that toolchain.
     (cd "${src_dir}/client-sdk-rust" && rustup target add "$rust_target")
 
-    # The SDK reports errors by throwing, and the extension can only catch them if both share one C++ runtime.
-    # With the NDK's default static runtime, each library gets its own exception types, and the app aborts instead.
     cmake -S "$src_dir" -B "${work_dir}/build" -G Ninja \
-        -DCMAKE_TOOLCHAIN_FILE="${ndk_root}/build/cmake/android.toolchain.cmake" \
-        -DANDROID_ABI="$android_abi" \
-        -DANDROID_PLATFORM=android-24 \
-        -DANDROID_STL=c++_shared \
+        "${platform_args[@]}" \
         -DCMAKE_BUILD_TYPE=Release \
         -DLIVEKIT_VERSION="$LIVEKIT_VERSION" \
         -DProtobuf_PROTOC_EXECUTABLE="${work_dir}/protoc/bin/protoc"
     cmake --build "${work_dir}/build" -j "$(getconf _NPROCESSORS_ONLN)"
-    cmake --install "${work_dir}/build" --prefix "$(pwd)/livekit-sdk"
-    # Apps also need WebRTC's Java classes, which come with the WebRTC build that the SDK's build downloads.
-    local webrtc_jar
-    # The SDK's build puts Cargo's output in CARGO_TARGET_DIR when it's set, relative to client-sdk-rust.
-    webrtc_jar=$(cd "${src_dir}/client-sdk-rust" && find "$(cd "${CARGO_TARGET_DIR:-target}" && pwd)" -path "*/out/livekit_webrtc/*" -name libwebrtc.jar | head -1)
-    if [ -z "$webrtc_jar" ]; then
-        echo -e "${RED}libwebrtc.jar not found in the LiveKit SDK build${NC}"
-        exit 1
+    cmake --install "${work_dir}/build" --prefix "$(pwd)/${LIVEKIT_SDK_DIR}"
+    if [ "$PLATFORM" == "android" ]; then
+        # Apps also need WebRTC's Java classes, which come with the WebRTC build that the SDK's build downloads.
+        local webrtc_jar
+        # The SDK's build puts Cargo's output in CARGO_TARGET_DIR when it's set, relative to client-sdk-rust.
+        webrtc_jar=$(cd "${src_dir}/client-sdk-rust" && find "$(cd "${CARGO_TARGET_DIR:-target}" && pwd)" -path "*/out/livekit_webrtc/*" -name libwebrtc.jar | head -1)
+        if [ -z "$webrtc_jar" ]; then
+            echo -e "${RED}libwebrtc.jar not found in the LiveKit SDK build${NC}"
+            exit 1
+        fi
+        mkdir -p "${LIVEKIT_SDK_DIR}/java"
+        cp "$webrtc_jar" "${LIVEKIT_SDK_DIR}/java/"
     fi
-    mkdir -p livekit-sdk/java
-    cp "$webrtc_jar" livekit-sdk/java/
 
-    livekit_version_key > livekit-sdk/.version
+    livekit_version_key > "${LIVEKIT_SDK_DIR}/.version"
     rm -rf "$work_dir"
     echo -e "${GREEN}LiveKit SDK built successfully!${NC}"
 }
@@ -385,12 +443,12 @@ fetch_frametap() {
 check_livekit_cache() {
     echo -e "${YELLOW}Checking livekit SDK cache...${NC}"
 
-    if [ ! -d "livekit-sdk/include/livekit" ] || [ ! -d "livekit-sdk/lib" ]; then
+    if [ ! -d "${LIVEKIT_SDK_DIR}/include/livekit" ] || [ ! -d "${LIVEKIT_SDK_DIR}/lib" ]; then
         echo -e "${RED}Cache miss: livekit SDK not found${NC}"
         return 1
     fi
 
-    if [ -f "livekit-sdk/.version" ] && [ "$(cat livekit-sdk/.version)" = "$(livekit_version_key)" ]; then
+    if [ -f "${LIVEKIT_SDK_DIR}/.version" ] && [ "$(cat ${LIVEKIT_SDK_DIR}/.version)" = "$(livekit_version_key)" ]; then
         echo -e "${GREEN}livekit SDK cache is valid!${NC}"
         return 0
     fi
@@ -446,6 +504,26 @@ install_dependencies() {
         fi
 
         local required_tools=("scons" "curl" "tar" "unzip")
+        local missing_tools=()
+
+        for tool in "${required_tools[@]}"; do
+            if ! command -v "$tool" &> /dev/null; then
+                missing_tools+=("$tool")
+            fi
+        done
+
+        if [ ${#missing_tools[@]} -ne 0 ]; then
+            echo -e "${RED}Missing required tools: ${missing_tools[*]}${NC}"
+            exit 1
+        fi
+    elif [ "$PLATFORM" == "ios" ]; then
+        if [[ "$OSTYPE" != "darwin"* ]]; then
+            echo -e "${RED}iOS builds require macOS with Xcode. Current OS: $OSTYPE${NC}"
+            exit 1
+        fi
+
+        # Building the LiveKit SDK also needs git, CMake, Ninja and Rust (rustup); packaging needs Xcode's tools.
+        local required_tools=("scons" "curl" "tar" "unzip" "git" "cmake" "ninja" "rustup" "cargo" "xcodebuild" "xcrun" "codesign" "install_name_tool" "otool")
         local missing_tools=()
 
         for tool in "${required_tools[@]}"; do
@@ -516,18 +594,24 @@ build_main_project() {
     if [ "$PLATFORM" == "android" ]; then
         local dep_dir="addons/godot-livekit/bin/android-${ARCH}"
         mkdir -p "$dep_dir"
-        cp livekit-sdk/lib/*.so "$dep_dir/" || true
+        cp ${LIVEKIT_SDK_DIR}/lib/*.so "$dep_dir/" || true
     elif [ "$PLATFORM" == "web" ]; then
         # livekit-client is embedded in the wasm, so its license ships alongside it.
         cp livekit-js/LICENSE addons/godot-livekit/bin/livekit-client-LICENSE.txt
     elif [ "$PLATFORM" == "linux" ]; then
-        cp livekit-sdk/lib/*.so* addons/godot-livekit/bin/ || true
+        cp ${LIVEKIT_SDK_DIR}/lib/*.so* addons/godot-livekit/bin/ || true
     elif [ "$PLATFORM" == "windows" ]; then
-        cp livekit-sdk/bin/*.dll addons/godot-livekit/bin/ || true
+        cp ${LIVEKIT_SDK_DIR}/bin/*.dll addons/godot-livekit/bin/ || true
+    elif [ "$PLATFORM" == "ios" ]; then
+        local slice_dir="build/ios-${ARCH}"
+        [ "$IOS_SIMULATOR" = true ] && slice_dir="${slice_dir}-simulator"
+        cp "${LIVEKIT_SDK_DIR}"/lib/*.dylib "$slice_dir/"
+        prepare_ios_slice "$slice_dir"
+        package_ios_xcframeworks
     elif [ "$PLATFORM" == "macos" ]; then
         local dep_dir="addons/godot-livekit/bin/macos-${ARCH}"
         mkdir -p "$dep_dir"
-        cp livekit-sdk/lib/*.dylib "$dep_dir/" || true
+        cp ${LIVEKIT_SDK_DIR}/lib/*.dylib "$dep_dir/" || true
 
         # Fix hardcoded absolute paths in dylibs from upstream CI builds
         echo -e "${YELLOW}Fixing dylib install names...${NC}"
@@ -541,13 +625,54 @@ build_main_project() {
     fi
 }
 
-# Prints the key that identifies the LiveKit SDK build in livekit-sdk/.version.
+# Gives each library in an iOS slice the name it will have once Godot's iOS export turns it into a framework,
+# @rpath/<name>.framework/<name>, and points the libraries' references to each other at those names.
+# (The export renames each library, but not the references.)
+prepare_ios_slice() {
+    local slice_dir="$1"
+    local dylib name dependency dependency_name
+    for dylib in "$slice_dir"/*.dylib; do
+        name=$(basename "$dylib" .dylib)
+        install_name_tool -id "@rpath/${name}.framework/${name}" "$dylib"
+        otool -L "$dylib" | tail -n +2 | awk '{print $1}' | while read -r dependency; do
+            dependency_name=$(basename "$dependency" .dylib)
+            if [ -f "$slice_dir/${dependency_name}.dylib" ] && [ "$dependency_name" != "$name" ]; then
+                install_name_tool -change "$dependency" "@rpath/${dependency_name}.framework/${dependency_name}" "$dylib"
+            fi
+        done
+        # Each framework finds the others beside its own, in the app's Frameworks directory.
+        if ! otool -l "$dylib" | grep -A2 LC_RPATH | grep -q "@loader_path/.."; then
+            install_name_tool -add_rpath "@loader_path/.." "$dylib"
+        fi
+        # Changing a library invalidates its signature, and arm64 code (even in the simulator) must be signed.
+        codesign --force --sign - "$dylib"
+    done
+}
+
+# Combines the iOS slices built so far (device, simulator, or both) into one .xcframework per library.
+package_ios_xcframeworks() {
+    local bin_dir="addons/godot-livekit/bin"
+    local name slice_dir args
+    for name in "libgodot-livekit.ios.${ARCH}" liblivekit liblivekit_ffi; do
+        args=()
+        for slice_dir in "build/ios-${ARCH}" "build/ios-${ARCH}-simulator"; do
+            if [ -f "$slice_dir/${name}.dylib" ]; then
+                args+=(-library "$slice_dir/${name}.dylib")
+            fi
+        done
+        local xcframework="$bin_dir/${name%.ios.${ARCH}}.ios.xcframework"
+        rm -rf "$xcframework"
+        xcodebuild -create-xcframework "${args[@]}" -output "$xcframework"
+    done
+}
+
+# Prints the key that identifies the LiveKit SDK build in its .version file.
 livekit_version_key() {
     if [ "$PLATFORM" == "macos" ]; then
         echo "${LIVEKIT_VERSION}-${ARCH}"
     elif [ "$BUILD_LIVEKIT_SDK" = true ]; then
         # A changed patch needs a rebuild.
-        echo "${LIVEKIT_VERSION}-${ARCH}-$(git hash-object "$LIVEKIT_ANDROID_PATCH" | cut -c1-12)"
+        echo "${LIVEKIT_VERSION}-${PLATFORM}-${ARCH}$([ "$IOS_SIMULATOR" = true ] && echo -simulator)-$(git hash-object "$LIVEKIT_MOBILE_PATCH" | cut -c1-12)"
     else
         echo "$LIVEKIT_VERSION"
     fi
@@ -567,8 +692,11 @@ main() {
             --debug)
                 BUILD_TARGET="template_debug"
                 ;;
-            linux|macos|windows|android|web)
+            linux|macos|windows|android|ios|web)
                 platform_arg="$arg"
+                ;;
+            --simulator)
+                IOS_SIMULATOR=true
                 ;;
             arm64|x86_64)
                 arch_arg="$arg"
@@ -596,6 +724,9 @@ main() {
         android)
             setup_android "$arch_arg"
             ;;
+        ios)
+            setup_ios
+            ;;
         web)
             setup_web
             ;;
@@ -619,7 +750,7 @@ main() {
     elif check_livekit_cache; then
         echo -e "${GREEN}Using cached livekit SDK${NC}"
     elif [ "$BUILD_LIVEKIT_SDK" = true ]; then
-        build_livekit_android
+        build_livekit_sdk
     else
         fetch_livekit
     fi

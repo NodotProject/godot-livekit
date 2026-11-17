@@ -9,6 +9,7 @@ macos.arm64 = "res://addons/godot-livekit/bin/libgodot-livekit.macos.arm64.dylib
 macos.x86_64 = "res://addons/godot-livekit/bin/libgodot-livekit.macos.x86_64.dylib"
 android.arm64 = "res://addons/godot-livekit/bin/libgodot-livekit.android.arm64.so"
 android.x86_64 = "res://addons/godot-livekit/bin/libgodot-livekit.android.x86_64.so"
+ios.arm64 = "res://addons/godot-livekit/bin/libgodot-livekit.ios.xcframework"
 web.wasm32.nothreads = "res://addons/godot-livekit/bin/libgodot-livekit.web.wasm32.nothreads.wasm"
 
 [dependencies]
@@ -18,3 +19,4 @@ macos.arm64 = {"res://addons/godot-livekit/bin/macos-arm64/liblivekit_ffi.dylib"
 macos.x86_64 = {"res://addons/godot-livekit/bin/macos-x86_64/liblivekit_ffi.dylib": "", "res://addons/godot-livekit/bin/macos-x86_64/liblivekit.dylib": ""}
 android.arm64 = {"res://addons/godot-livekit/bin/android-arm64/liblivekit_ffi.so": "", "res://addons/godot-livekit/bin/android-arm64/liblivekit.so": ""}
 android.x86_64 = {"res://addons/godot-livekit/bin/android-x86_64/liblivekit_ffi.so": "", "res://addons/godot-livekit/bin/android-x86_64/liblivekit.so": ""}
+ios.arm64 = {"res://addons/godot-livekit/bin/liblivekit_ffi.ios.xcframework": "", "res://addons/godot-livekit/bin/liblivekit.ios.xcframework": ""}
