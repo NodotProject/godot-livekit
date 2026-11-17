@@ -14,8 +14,8 @@
 - **RPC Support**: Perform remote procedure calls between participants.
 - **End-to-End Encryption (E2EE)**: Secure your media streams with configurable encryption, key management, and per-participant frame cryptors.
 - **Connection Statistics**: Access detailed WebRTC statistics including inbound/outbound RTP, codecs, transport, and candidate pair metrics.
-- **Fast Build Times**: Uses prebuilt binaries for both `godot-cpp` and the LiveKit C++ SDK, reducing compilation time to seconds instead of hours.
-- **Cross-Platform**: Supports Linux, macOS (Universal), Windows, and the web (see [Web](#web)).
+- **Fast Build Times**: Uses LiveKit's prebuilt C++ SDK on desktop platforms, so builds there only compile `godot-cpp` and the extension. (Android and iOS builds also compile the SDK, which takes longer.)
+- **Cross-Platform**: Supports Linux, macOS (Universal), Windows, Android, iOS, and the web (see [Android and iOS](#android-and-ios) and [Web](#web)).
 - **Native GDExtension**: Works out-of-the-box with Godot 4.5 without requiring custom engine builds.
 
 ## Prerequisites
@@ -31,10 +31,12 @@ To build the extension from source, you will need:
 - **macOS:** Xcode Command Line Tools, `curl`, `tar`, `unzip`
 - **Windows:** MSVC (Visual Studio Build Tools) or MinGW-w64 (if cross-compiling from Linux/macOS)
 - **Web:** `emcc` from [emsdk](https://emscripten.org), at the version Godot's web templates were built with (4.0.11 for Godot 4.5), plus `curl` and `tar`
+- **Android:** the Android NDK (r27 or later) in `ANDROID_NDK_ROOT`, plus `git`, CMake, Ninja and Rust (`rustup`) to build the LiveKit SDK
+- **iOS:** macOS with Xcode, plus `git`, CMake, Ninja and Rust (`rustup`) to build the LiveKit SDK
 
 ## Building from Source
 
-This repository includes a custom `build.sh` script that automatically fetches the required LiveKit C++ SDK and `godot-cpp` prebuilt binaries, and compiles the extension.
+This repository includes a custom `build.sh` script that fetches the LiveKit C++ SDK (building it from source for Android and iOS) and `godot-cpp`, and compiles the extension.
 
 1. **Clone the repository:**
    ```bash
@@ -60,14 +62,22 @@ This repository includes a custom `build.sh` script that automatically fetches t
      ```bash
      ./build.sh web
      ```
+   - **Android** (arm64, or `x86_64` for emulators):
+     ```bash
+     ./build.sh android
+     ```
+   - **iOS** (devices, then the simulator; each build adds to the same `.xcframework`s):
+     ```bash
+     ./build.sh ios
+     ./build.sh ios --simulator
+     ```
 
-Once the build is complete, the compiled dynamic libraries (`.so`, `.dylib`, or `.dll`) and the LiveKit shared libraries will be placed in the `addons/godot-livekit/bin/` directory.
+Once the build is complete, the compiled libraries (`.so`, `.dylib`, `.dll`, or `.xcframework`) and the LiveKit shared libraries will be placed in the `addons/godot-livekit/bin/` directory.
 
 ## Usage in Godot
 
-1. Copy the `addons/godot-livekit` folder into your Godot project's `addons/` directory.
-2. Enable the plugin from the Godot Editor: **Project -> Project Settings -> Plugins**.
-3. You can now access LiveKit classes directly from GDScript:
+1. Copy the `addons/godot-livekit` folder into your Godot project's `addons/` directory. Godot loads the extension when the project opens.
+2. You can now access LiveKit classes directly from GDScript:
 
 ```gdscript
 extends Node
@@ -113,6 +123,24 @@ func _on_frame():
     # Feed into a LiveKitVideoSource for screen sharing
 ```
 
+## Android and iOS
+
+The Android and iOS builds include every class except `LiveKitScreenCapture`, which isn't registered on mobile.
+
+To send microphone audio, capture it with Godot (e.g. an `AudioStreamMicrophone` and an `AudioEffectCapture`) and enable **Audio > Driver > Enable Input** in the project settings.
+
+To export for Android:
+
+- Enable **Use Gradle Build** in the Android export preset, along with the **Internet**, **Access Network State**, **Record Audio** and **Modify Audio Settings** permissions.
+- The app also needs WebRTC's Java classes. After installing the Android build template, copy `livekit-sdk/java/libwebrtc.jar` (from `./build.sh android`) into the project's `android/build/libs/debug/` and `android/build/libs/release/`. Release packages don't include it yet.
+
+To export for iOS:
+
+- The iOS build runs on arm64 devices with iOS 14 or later, and in the iOS simulator on Macs with Apple silicon.
+- The editor loads the extension's macOS library while exporting, so keep it in the addon (`./build.sh macos` when building from source). Release packages include it.
+- To record audio, set **Privacy > Microphone Usage Description** in the iOS export preset, since iOS stops apps that use the microphone without one. Also set **Audio > General > iOS > Session Category** to **Play and Record** in the project settings, since Godot's default (Ambient) can't record.
+- Godot's official export templates can't run in the simulator on Apple silicon ([godotengine/godot#122379](https://github.com/godotengine/godot/issues/122379)), so testing there needs a Godot simulator library built from source, as `test_ios.sh` describes.
+
 ## Web
 
 Web exports use a separate build of the extension that implements the same classes on top of [livekit-client](https://github.com/livekit/client-sdk-js), which is embedded in it. Every class is available except `LiveKitAudioProcessingModule`, which isn't registered on the web, since browsers apply their own processing to captured audio, so `ClassDB.class_exists()` reports it as missing.
@@ -137,9 +165,11 @@ If you have [GUT (Godot Unit Test)](https://github.com/bitwes/Gut) installed in 
 
 `./test_android.sh` runs the tests on a connected Android device or emulator. It requires an Android build for the device (`./build.sh android x86_64` for an x86_64 emulator), Godot's Android export templates, the Android SDK (`ANDROID_HOME`) and a JDK (`JAVA_HOME`).
 
+`./test_ios.sh` runs the tests in the iOS simulator. It requires a simulator build (`./build.sh ios --simulator`) and a macOS build, Xcode, Godot's iOS export templates, and an arm64 simulator build of Godot's library (see the script). `./test_ios.sh --build-for-device` instead checks that the project exports and builds for iOS devices.
+
 ## Continuous Integration
 
-The project is configured with GitHub Actions to automatically build releases for Linux, Windows, and macOS whenever a new tag (e.g., `v1.0.0`) is pushed. Check the `.github/workflows` directory for details.
+The project is configured with GitHub Actions to automatically build releases for Linux, Windows, macOS, Android, iOS, and the web whenever a new tag (e.g., `v1.0.0`) is pushed. Check the `.github/workflows` directory for details.
 
 ## License
 
