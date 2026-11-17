@@ -129,14 +129,19 @@ check_bundled_frameworks() {
 # The simulator's background work after booting can take most of the host's CPU, enough to time
 # out e2e tests, so wait (within a limit) for it to settle before running them.
 wait_for_idle_cpu() {
-    local deadline=$((SECONDS + ${IOS_SETTLE_TIMEOUT_SEC:-300})) idle
-    while [ $SECONDS -lt $deadline ]; do
-        # top's first sample is an average since boot, so read its second.
-        idle=$(top -l 2 -s 5 -n 0 | awk '/^CPU usage/ {v = $(NF - 1)} END {sub(/%/, "", v); print int(v)}')
-        [ "${idle:-0}" -ge 50 ] && return 0
+    local deadline=$((SECONDS + ${IOS_SETTLE_TIMEOUT_SEC:-300})) cpus idle
+    cpus=$(sysctl -n hw.ncpu)
+    while true; do
+        # ps gives each process's recent CPU use as a percentage of one core.
+        idle=$(ps -A -o %cpu= | awk -v cpus="$cpus" '{used += $1} END {print int(100 - used / cpus)}')
+        [ "$idle" -ge 50 ] && return 0
+        if [ $SECONDS -ge $deadline ]; then
+            echo -e "${YELLOW}The host's CPU is still busy (${idle}% idle). Running the tests anyway.${NC}"
+            return 0
+        fi
         echo "Waiting for the host's CPU to settle (${idle}% idle)..."
+        sleep 5
     done
-    echo -e "${YELLOW}The host's CPU is still busy. Running the tests anyway.${NC}"
 }
 
 # A newly booted simulator spends a minute or two on background work, so boot it before exporting.
