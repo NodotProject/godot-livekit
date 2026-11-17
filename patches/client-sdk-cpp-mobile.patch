@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 00d4bd3..0818ce8 100644
+index 00d4bd3..0a58e29 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -211,6 +211,15 @@ if(_lk_capture_features)
@@ -18,7 +18,7 @@ index 00d4bd3..0818ce8 100644
  message(STATUS "LIVEKIT_CAPTURE='${LIVEKIT_CAPTURE}' -> cargo features: '${LIVEKIT_CARGO_FEATURES}'")
  
  set(GIT_COMMIT "unknown")
-@@ -261,14 +270,70 @@ configure_file(
+@@ -261,14 +270,66 @@ configure_file(
  
  find_program(CARGO_EXECUTABLE NAMES cargo REQUIRED)
  
@@ -29,19 +29,15 @@ index 00d4bd3..0818ce8 100644
 +set(LIVEKIT_ANDROID_NDK "")
 +set(LIVEKIT_ANDROID_CC "")
 +if(IOS)
++  # LiveKit's WebRTC builds for iOS are arm64 only, for devices and for the simulator.
++  if(NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
++    message(FATAL_ERROR "iOS builds need CMAKE_OSX_ARCHITECTURES=arm64, not '${CMAKE_OSX_ARCHITECTURES}'")
++  endif()
 +  # CMake builds for the simulator when the sysroot is the simulator SDK, given by name or by path.
 +  if(CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")
-+    if(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
-+      set(RUST_TARGET_TRIPLE "aarch64-apple-ios-sim")
-+    elseif(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
-+      set(RUST_TARGET_TRIPLE "x86_64-apple-ios")
-+    endif()
-+  elseif(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
++    set(RUST_TARGET_TRIPLE "aarch64-apple-ios-sim")
++  else()
 +    set(RUST_TARGET_TRIPLE "aarch64-apple-ios")
-+  endif()
-+  if(NOT RUST_TARGET_TRIPLE)
-+    message(FATAL_ERROR "Unsupported iOS build: set CMAKE_OSX_ARCHITECTURES to one architecture "
-+                        "(arm64, or x86_64 for the simulator), not '${CMAKE_OSX_ARCHITECTURES}'")
 +  endif()
 +elseif(APPLE AND CMAKE_OSX_ARCHITECTURES)
    if(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
@@ -91,7 +87,7 @@ index 00d4bd3..0818ce8 100644
  endif()
  
  # Cargo artifacts cannot be shared between capture-enabled and disabled SDKs.
-@@ -293,7 +358,8 @@ endif()
+@@ -293,7 +354,8 @@ endif()
  # This is needed when using a non-system GCC (e.g. GCC 14) on an older distro whose
  # system libstdc++ lacks symbols like __cxa_call_terminate.
  set(GCC_LIB_DIR "")
@@ -101,7 +97,7 @@ index 00d4bd3..0818ce8 100644
    get_filename_component(_gcc_bin_dir "${CMAKE_C_COMPILER}" DIRECTORY)
    get_filename_component(_gcc_root "${_gcc_bin_dir}" DIRECTORY)
    if(IS_DIRECTORY "${_gcc_root}/lib64")
-@@ -397,8 +463,12 @@ add_custom_command(
+@@ -397,8 +459,12 @@ add_custom_command(
            -DCARGO=${CARGO_EXECUTABLE}
            -DPROTOC_PATH=${Protobuf_PROTOC_EXECUTABLE}
            -DRUST_TARGET=${RUST_TARGET_TRIPLE}
@@ -114,7 +110,7 @@ index 00d4bd3..0818ce8 100644
            -DCARGO_TARGET_DIR=${LIVEKIT_CARGO_TARGET_DIR}
            -P "${RUN_CARGO_SCRIPT}"
    WORKING_DIRECTORY "${RUST_ROOT}"
-@@ -533,7 +603,7 @@ target_link_libraries(livekit
+@@ -533,7 +599,7 @@ target_link_libraries(livekit
  
  if(WIN32)
    target_link_libraries(livekit PRIVATE winhttp)
@@ -123,7 +119,7 @@ index 00d4bd3..0818ce8 100644
    find_package(CURL REQUIRED)
    target_link_libraries(livekit PRIVATE CURL::libcurl)
  endif()
-@@ -637,13 +707,16 @@ if(APPLE)
+@@ -637,13 +703,16 @@ if(APPLE)
    find_library(FW_AVFOUNDATION   AVFoundation   REQUIRED)
    find_library(FW_COREVIDEO      CoreVideo      REQUIRED)
    find_library(FW_FOUNDATION     Foundation     REQUIRED)
@@ -143,7 +139,7 @@ index 00d4bd3..0818ce8 100644
  
    target_link_libraries(livekit PRIVATE
      ${FW_COREAUDIO}
-@@ -656,14 +729,14 @@ if(APPLE)
+@@ -656,14 +725,14 @@ if(APPLE)
      ${FW_AVFOUNDATION}
      ${FW_COREVIDEO}
      ${FW_FOUNDATION}
@@ -161,7 +157,7 @@ index 00d4bd3..0818ce8 100644
  
    target_link_options(livekit PRIVATE "LINKER:-ObjC")
  endif()
-@@ -684,7 +757,7 @@ if(WIN32)
+@@ -684,7 +753,7 @@ if(WIN32)
    )
  endif()
  
