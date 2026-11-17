@@ -1,16 +1,16 @@
 extends Node
-## Runs GUT inside an Android export, where tests can't be passed on a command line. test_android.sh
-## bakes the tests to run, and env vars read by the test helpers, into the export as user arguments
-## (`tests=res://test/unit/test_room.gd,... RUN_E2E=1 ...`).
-## Prints `GUT_ANDROID_STARTED` once it's running and `GUT_ANDROID_RESULT tests=N failing=N pending=N`
-## when done, for test_android.sh to parse, and quits.
+## Runs GUT inside an Android or iOS export, where GUT's command line runner isn't available.
+## test_android.sh and test_ios.sh pass the tests to run, and env vars read by the test helpers, as
+## user arguments (`tests=res://test/unit/test_room.gd,... RUN_E2E=1 ...`).
+## Prints `GUT_MOBILE_STARTED` once it's running and `GUT_MOBILE_RESULT tests=N failing=N pending=N`
+## when done, for the scripts to parse, and quits (which iOS ignores).
 
 const GutConfig := preload("res://addons/gut/gut_config.gd")
 const GutRunner := preload("res://addons/gut/gui/GutRunner.tscn")
 
 
 func _ready() -> void:
-	print("GUT_ANDROID_STARTED")
+	print("GUT_MOBILE_STARTED")
 	var tests := PackedStringArray()
 	for arg in OS.get_cmdline_user_args():
 		var parts := arg.split("=", true, 1)
@@ -29,10 +29,10 @@ func _ready() -> void:
 	add_child(runner)
 	var gut = runner.get_gut()
 	gut.end_run.connect(func() -> void:
-		print("GUT_ANDROID_RESULT tests=%d failing=%d pending=%d" % [
+		print("GUT_MOBILE_RESULT tests=%d failing=%d pending=%d" % [
 			gut.get_test_count(), gut.get_fail_count(), gut.get_pending_count()
 		])
-		# Quitting flushes the log file, and tells test_android.sh the run is over.
+		# On Android, quitting flushes the log file and tells test_android.sh the run is over.
 		get_tree().quit()
 	)
 	runner.run_tests(false)
