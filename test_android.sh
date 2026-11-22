@@ -217,7 +217,9 @@ EOF
     # Gradle leaves a daemon running, which would compete with an emulator for memory.
     (cd android/build && ./gradlew --stop >/dev/null 2>&1) || true
     # The editor's own build of the extension adds libwebrtc.jar. Without it, the app only fails once it uses WebRTC.
-    if ! unzip -p "$apk_path" 'classes*.dex' | grep -aq 'Lorg/webrtc/PeerConnectionFactory;'; then
+    # Unzipped to a file, since grep stops at the first match, and pipefail would then fail unzip.
+    unzip -p "$apk_path" 'classes*.dex' >"$WORK_DIR/classes.dex"
+    if ! grep -aq 'Lorg/webrtc/PeerConnectionFactory;' "$WORK_DIR/classes.dex"; then
         echo -e "${RED}The export lacks WebRTC's Java classes. Build the extension for the editor's platform too (e.g. ./build.sh linux).${NC}"
         exit 1
     fi
