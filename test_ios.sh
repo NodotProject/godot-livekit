@@ -252,6 +252,9 @@ done
 echo -e "${YELLOW}Running the tests...${NC}"
 container=$(xcrun simctl get_app_container "$DEVICE" "$BUNDLE_ID" data)
 app_logs=("$container/Documents/logs/$APP_LOG" "$container/Documents/$APP_LOG")
+# Installing over an earlier run (e.g. with IOS_SIMULATOR_UDID) keeps its data, including its result.
+xcrun simctl terminate "$DEVICE" "$BUNDLE_ID" >/dev/null 2>&1 || true
+rm -f "${app_logs[@]}"
 xcrun simctl launch --console "$DEVICE" "$BUNDLE_ID" "${args[@]}" >"$WORK_DIR/console.log" 2>&1 &
 launch_pid=$!
 # Godot on iOS ignores quit requests, so the app is stopped once the runner reports its result.
