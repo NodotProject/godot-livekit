@@ -132,7 +132,7 @@ To send microphone audio, capture it with Godot (e.g. an `AudioStreamMicrophone`
 To export for Android:
 
 - Enable **Use Gradle Build** in the Android export preset, along with the **Internet**, **Access Network State**, **Record Audio** and **Modify Audio Settings** permissions.
-- The app also needs WebRTC's Java classes. After installing the Android build template, copy `livekit-sdk/java/libwebrtc.jar` (from `./build.sh android`) into the project's `android/build/libs/debug/` and `android/build/libs/release/`. Release packages don't include it yet.
+- The app also needs WebRTC's Java classes, which come in the addon as `bin/libwebrtc.jar`. The extension adds them to Gradle builds from the editor, so keep the library for the editor's platform in the addon too (e.g. `./build.sh linux` when building from source). Release packages include both.
 
 To export for iOS:
 
@@ -163,7 +163,7 @@ If you have [GUT (Godot Unit Test)](https://github.com/bitwes/Gut) installed in 
 
 `./test_web.sh` runs the tests that apply to the web build in headless Chrome. It requires a web build, Godot's web export templates, and `google-chrome`.
 
-`./test_android.sh` runs the tests on a connected Android device or emulator. It requires an Android build for the device (`./build.sh android x86_64` for an x86_64 emulator), Godot's Android export templates, the Android SDK (`ANDROID_HOME`) and a JDK (`JAVA_HOME`).
+`./test_android.sh` runs the tests on a connected Android device or emulator. It requires an Android build for the device (`./build.sh android x86_64` for an x86_64 emulator), a build for the editor's platform (e.g. `./build.sh linux`), Godot's Android export templates, the Android SDK (`ANDROID_HOME`) and a JDK (`JAVA_HOME`).
 
 `./test_ios.sh` runs the tests in the iOS simulator. It requires a simulator build (`./build.sh ios --simulator`) and a macOS build, Xcode, Godot's iOS export templates, and an arm64 simulator build of Godot's library (see the script). `./test_ios.sh --build-for-device` instead checks that the project exports and builds for iOS devices.
 

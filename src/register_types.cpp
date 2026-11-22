@@ -22,6 +22,10 @@
 #ifdef LIVEKIT_E2EE_SUPPORTED
 #include "livekit_e2ee.h"
 #endif
+#ifdef LIVEKIT_EDITOR_PLUGIN
+#include "livekit_editor_plugin.h"
+#include <godot_cpp/classes/editor_plugin_registration.hpp>
+#endif
 
 #include <gdextension_interface.h>
 #include <godot_cpp/core/defs.hpp>
@@ -36,6 +40,15 @@ static void livekit_frame_callback() {
 }
 
 void initialize_livekit_module(ModuleInitializationLevel p_level) {
+#ifdef LIVEKIT_EDITOR_PLUGIN
+    // Only the editor reaches this level, so exported games don't register editor classes.
+    if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
+        GDREGISTER_INTERNAL_CLASS(LiveKitAndroidExportPlugin);
+        GDREGISTER_INTERNAL_CLASS(LiveKitEditorPlugin);
+        EditorPlugins::add_by_type<LiveKitEditorPlugin>();
+        return;
+    }
+#endif
     if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
         return;
     }

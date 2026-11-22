@@ -236,6 +236,11 @@ if enable_screen_capture:
 if enable_e2ee:
     src_files.append('src/livekit_e2ee.cpp')
 
+# Only desktop builds run in the editor.
+if platform in ('linux', 'windows', 'macos'):
+    env.Append(CPPDEFINES=['LIVEKIT_EDITOR_PLUGIN'])
+    src_files.append('src/livekit_editor_plugin.cpp')
+
 env.Execute(Mkdir('addons/godot-livekit/bin'))
 
 if is_windows:

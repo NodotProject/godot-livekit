@@ -70,6 +70,7 @@ jobs:
         path: |
           godot-cpp
           livekit-sdk
+          livekit-sdk-android-*
         key: deps-${{ matrix.platform }}-${{ matrix.arch || matrix.platform }}-${{ hashFiles('build.sh', 'patches/**') }}
 
     - name: Build GDExtension
@@ -229,8 +230,8 @@ jobs:
     - name: Export NDK path
       run: echo "ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
 
-    - name: Install Android SDK build dependencies
-      run: sudo apt-get update && sudo apt-get install -y ninja-build
+    - name: Install build dependencies
+      run: sudo apt-get update && sudo apt-get install -y ninja-build libx11-dev libxext-dev libxfixes-dev libxinerama-dev libwayland-dev libpipewire-0.3-dev libsystemd-dev
 
     - name: Cache dependencies
       uses: actions/cache@v4
@@ -238,11 +239,13 @@ jobs:
         path: |
           godot-cpp
           livekit-sdk
+          livekit-sdk-android-*
         key: deps-android-x86_64-${{ hashFiles('build.sh', 'patches/**') }}
 
-    # x86_64, since GitHub's runners can only emulate their own architecture at a usable speed.
+    # x86_64, since GitHub's runners can only emulate their own architecture at a usable speed. The
+    # editor that exports the app needs the Linux library, which adds libwebrtc.jar to the export.
     - name: Build GDExtension
-      run: ./build.sh android x86_64
+      run: ./build.sh android x86_64 && ./build.sh linux
 
     - name: Set up Java
       uses: actions/setup-java@v4

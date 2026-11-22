@@ -122,7 +122,9 @@ setup_windows() {
 setup_android() {
     PLATFORM="android"
     ARCH="${1:-arm64}"
-    SCONS_FLAGS="platform=android arch=${ARCH} screen_capture=no"
+    # Its own folder, so that Android and desktop builds in one checkout don't replace each other's SDK.
+    LIVEKIT_SDK_DIR="livekit-sdk-android-${ARCH}"
+    SCONS_FLAGS="platform=android arch=${ARCH} livekit_sdk=${LIVEKIT_SDK_DIR} screen_capture=no"
     BUILD_LIVEKIT_SDK=true
     SKIP_FRAMETAP=true
     echo -e "${BLUE}=== Godot-LiveKit Local Build Script (Android ${ARCH}) ===${NC}"
@@ -595,6 +597,8 @@ build_main_project() {
         local dep_dir="addons/godot-livekit/bin/android-${ARCH}"
         mkdir -p "$dep_dir"
         cp ${LIVEKIT_SDK_DIR}/lib/*.so "$dep_dir/" || true
+        # The editor adds it to Android exports (src/livekit_editor_plugin.cpp). It's the same for every ABI.
+        cp "${LIVEKIT_SDK_DIR}/java/libwebrtc.jar" addons/godot-livekit/bin/
     elif [ "$PLATFORM" == "web" ]; then
         # livekit-client is embedded in the wasm, so its license ships alongside it.
         cp livekit-js/LICENSE addons/godot-livekit/bin/livekit-client-LICENSE.txt
