@@ -67,7 +67,7 @@ To send microphone audio, capture it with Godot (e.g. an `AudioStreamMicrophone`
 To export for Android:
 
 - Enable **Use Gradle Build** in the Android export preset, along with the **Internet**, **Access Network State**, **Record Audio** and **Modify Audio Settings** permissions.
-- The app also needs WebRTC's Java classes, which come in the addon as `bin/libwebrtc.jar`. The extension adds them to Gradle builds from the editor, so keep the library for the editor's platform in the addon too (e.g. `./build.sh linux` when building from source). Release packages include both.
+- The app also needs WebRTC's Java classes, which come in the addon as `bin/libwebrtc.jar`. The extension adds them to Gradle builds from the editor, so keep the library for the editor's platform in the addon too (e.g. `./build.sh linux` when building from source). Release packages include both. If you copied `libwebrtc.jar` into `android/build/libs/` yourself, delete it, since Gradle fails on duplicate classes.
 
 To export for iOS:
 
