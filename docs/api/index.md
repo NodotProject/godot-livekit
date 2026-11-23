@@ -194,7 +194,7 @@ Source for creating local audio tracks. Allows capturing audio data from Godot a
 *   `create(sample_rate: int, num_channels: int, queue_size_ms: int) -> LiveKitAudioSource`: Creates a new audio source.
 
 **Methods:**
-*   `capture_frame(data: PackedFloat32Array, sample_rate: int, num_channels: int, samples_per_channel: int)`: Captures an audio frame and queues it for sending.
+*   `capture_frame(data: PackedFloat32Array, sample_rate: int, num_channels: int, samples_per_channel: int)`: Captures an audio frame and queues it for sending. The frame's sample rate and channel count must match the source's, and if the source's `queue_size_ms` is 0, the frame must be 10ms long (e.g. 480 samples per channel at 48kHz). Otherwise, it reports an error and drops the frame. (On the web, frames are resampled, so neither is required.)
 *   `clear_queue()`: Clears the audio queue.
 *   `get_queued_duration() -> float`: Returns the duration of queued audio in seconds.
 *   `get_sample_rate() -> int`: Returns the configured sample rate.

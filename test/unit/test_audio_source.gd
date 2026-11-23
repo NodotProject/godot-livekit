@@ -63,6 +63,22 @@ func test_audio_source_is_ref_counted():
 	assert_true(source is RefCounted, "AudioSource should be RefCounted")
 
 
+func test_audio_source_rejects_frames_that_dont_match_it():
+	if OS.has_feature("web"):
+		pending("Frames needn't match the source on the web")
+		return
+	var direct = LiveKitAudioSource.create(48000, 1, 0)
+	var queued = LiveKitAudioSource.create(48000, 1, 100)
+	var long_frame := PackedFloat32Array()
+	long_frame.resize(1920)
+	queued.capture_frame(long_frame, 48000, 1, 1920)
+	assert_push_error(0, "a queued source should accept frames of any length")
+	direct.capture_frame(long_frame, 48000, 1, 1920)
+	direct.capture_frame(_tone_frame(), 44100, 1, 480)
+	queued.capture_frame(_tone_frame(), 48000, 2, 240)
+	assert_push_error(3)
+
+
 ## Returns 10ms of a 440Hz tone at 48kHz.
 func _tone_frame() -> PackedFloat32Array:
 	var data := PackedFloat32Array()
