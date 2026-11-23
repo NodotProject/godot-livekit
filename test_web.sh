@@ -99,7 +99,12 @@ cleanup() {
             rm -f export_presets.cfg
         fi
     fi
-    rm -rf "$WORK_DIR"
+    # Chrome's child processes can still be writing to its profile for a moment after it exits.
+    for _ in 1 2 3 4 5; do
+        rm -rf "$WORK_DIR" 2>/dev/null && return
+        sleep 1
+    done
+    echo -e "${YELLOW}Couldn't delete $WORK_DIR.${NC}"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
