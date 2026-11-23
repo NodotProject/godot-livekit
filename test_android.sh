@@ -2,9 +2,10 @@
 
 # Runs GUT tests on an Android device or emulator.
 #
-# Requires: an Android build for the device's architecture (./build.sh android [arm64|x86_64]),
-# Godot with its Android export templates installed, a device or emulator connected to adb, the
-# Android SDK (ANDROID_HOME) and a JDK (JAVA_HOME) for Godot's Gradle build. Unit tests run by
+# Requires: an Android build for the device's architecture (./build.sh android [arm64|x86_64]), a
+# build for the editor's platform (e.g. ./build.sh linux), which adds WebRTC's Java classes to the
+# export, Godot with its Android export templates installed, a device or emulator connected to adb,
+# the Android SDK (ANDROID_HOME) and a JDK (JAVA_HOME) for Godot's Gradle build. Unit tests run by
 # default; integration and e2e tests are added when LIVEKIT_TEST_URL / RUN_E2E are set, as in
 # test.sh. On an emulator, the host's localhost is 10.0.2.2.
 #
@@ -111,8 +112,8 @@ export_apk() {
         echo -e "${RED}Android ${arch} build not found. Run ./build.sh android ${arch} first.${NC}"
         exit 1
     fi
-    if [ ! -f livekit-sdk/java/libwebrtc.jar ]; then
-        echo -e "${RED}livekit-sdk/java/libwebrtc.jar not found. Rebuild with ./build.sh android ${arch}.${NC}"
+    if [ ! -f addons/godot-livekit/bin/libwebrtc.jar ]; then
+        echo -e "${RED}addons/godot-livekit/bin/libwebrtc.jar not found. Rebuild with ./build.sh android ${arch}.${NC}"
         exit 1
     fi
 
@@ -149,8 +150,6 @@ export_apk() {
         touch android/.livekit_test_template
         touch android/build/.gdignore
     fi
-    mkdir -p android/build/libs/debug
-    cp livekit-sdk/java/libwebrtc.jar android/build/libs/debug/
 
     # The keystore that signs debug exports. Godot creates one for the editor, but not when headless.
     if [ -z "${GODOT_ANDROID_KEYSTORE_DEBUG_PATH:-}" ]; then
@@ -217,6 +216,14 @@ EOF
     fi
     # Gradle leaves a daemon running, which would compete with an emulator for memory.
     (cd android/build && ./gradlew --stop >/dev/null 2>&1) || true
+    # The editor's own build of the extension adds libwebrtc.jar. Without it, the app only fails once it uses WebRTC.
+    # LiveKit renames WebRTC's Java package. Unzipped to a file, since grep stops at the first match,
+    # and pipefail would then fail unzip.
+    unzip -p "$apk_path" 'classes*.dex' >"$WORK_DIR/classes.dex"
+    if ! grep -aq 'Llivekit/org/webrtc/PeerConnectionFactory;' "$WORK_DIR/classes.dex"; then
+        echo -e "${RED}The export lacks WebRTC's Java classes. Build the extension for the editor's platform too (e.g. ./build.sh linux).${NC}"
+        exit 1
+    fi
     echo -e "${GREEN}Exported ${#tests[@]} test script(s) to ${apk_path}${NC}"
 }
 

@@ -9,6 +9,7 @@ export_presets.cfg
 godot-cpp/
 livekit-sdk/
 livekit-sdk-ios-*/
+livekit-sdk-android-*/
 livekit-sdk-build/
 livekit-js/
 src/web/gen/
