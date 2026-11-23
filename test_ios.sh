@@ -14,6 +14,10 @@
 # --build-for-device exports the project with a device build (./build.sh ios) and builds it, unsigned,
 # for iOS devices instead, then checks that the app bundles every framework its code links.
 #
+# If every failing test script is in one of the directories in ADVISORY_TEST_DIRS (e.g.
+# "test/integration test/e2e"), it exits with 3 rather than 1, so that CI can report those failures
+# without failing.
+#
 # Usage: ./test_ios.sh [--build-for-device] [res://test/path/to/test.gd ...]
 
 set -euo pipefail
@@ -141,6 +145,20 @@ wait_for_idle_cpu() {
         fi
         echo "Waiting for the host's CPU to settle (${idle}% idle)..."
         sleep 5
+    done
+}
+
+# Succeeds if the runner reported failing scripts, all of them in ADVISORY_TEST_DIRS.
+only_advisory_failures() {
+    local failed script dir advisory
+    failed=$(grep -aho 'GUT_MOBILE_FAILED_SCRIPT .*' "$@" | awk '{print $2}' | sort -u || true)
+    [ -n "$failed" ] && [ -n "${ADVISORY_TEST_DIRS:-}" ] || return 1
+    for script in $failed; do
+        advisory=false
+        for dir in $ADVISORY_TEST_DIRS; do
+            [[ "$script" == "res://${dir%/}/"* ]] && advisory=true
+        done
+        [ "$advisory" = true ] || return 1
     done
 }
 
@@ -294,6 +312,10 @@ if grep -q 'SCRIPT ERROR: Parse Error' "$LOG_FILE"; then
     exit 1
 fi
 if [ "$failing" != "0" ] || [ "$ran" == "0" ]; then
+    if [ "$ran" != "0" ] && only_advisory_failures "$LOG_FILE" "$WORK_DIR/console.log"; then
+        echo -e "${YELLOW}iOS tests failed, but only in ADVISORY_TEST_DIRS (${ADVISORY_TEST_DIRS}).${NC}"
+        exit 3
+    fi
     echo -e "${RED}iOS tests failed.${NC}"
     exit 1
 fi
