@@ -32,12 +32,26 @@ Ref<LiveKitAudioSource> LiveKitAudioSource::create(int sample_rate, int num_chan
     source->source_ = native_source;
     source->sample_rate_ = sample_rate;
     source->num_channels_ = num_channels;
+    source->direct_capture_ = queue_size_ms == 0;
     return source;
 }
 
 void LiveKitAudioSource::capture_frame(const PackedFloat32Array &data, int sample_rate, int num_channels, int samples_per_channel) {
     if (!source_) {
         UtilityFunctions::push_error("LiveKitAudioSource::capture_frame: source not initialized");
+        return;
+    }
+    // LiveKit's SDK reports these errors asynchronously and stops waiting for them after 20ms, so
+    // under load they would be dropped silently.
+    if (sample_rate != sample_rate_ || num_channels != num_channels_) {
+        UtilityFunctions::push_error("LiveKitAudioSource::capture_frame: the frame is ", sample_rate, " Hz with ",
+                num_channels, " channel(s), but the source is ", sample_rate_, " Hz with ", num_channels_,
+                " channel(s)");
+        return;
+    }
+    if (direct_capture_ && samples_per_channel != sample_rate / 100) {
+        UtilityFunctions::push_error("LiveKitAudioSource::capture_frame: a source with no queue needs 10ms frames (",
+                sample_rate / 100, " samples per channel), not ", samples_per_channel);
         return;
     }
 
@@ -51,8 +65,8 @@ void LiveKitAudioSource::capture_frame(const PackedFloat32Array &data, int sampl
         pcm_data[i] = static_cast<int16_t>(sample * 32767.0f);
     }
 
-    // Exceptions (e.g. for a frame that isn't 10ms in direct capture mode) must not escape into
-    // Godot, where they would terminate the process.
+    // Exceptions (e.g. for data that doesn't match samples_per_channel) must not escape into Godot,
+    // where they would terminate the process.
     try {
         livekit::AudioFrame frame(std::move(pcm_data), sample_rate, num_channels, samples_per_channel);
         source_->captureFrame(frame);

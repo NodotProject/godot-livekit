@@ -19,6 +19,7 @@ private:
     std::shared_ptr<livekit::AudioSource> source_;
     int sample_rate_ = 48000;
     int num_channels_ = 1;
+    bool direct_capture_ = false;
 
 protected:
     static void _bind_methods();

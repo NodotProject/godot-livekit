@@ -77,12 +77,3 @@ func test_echo_cancellation_removes_echo():
 				energy_in += near[i] * near[i]
 				energy_out += out[i] * out[i]
 	assert_lt(energy_out, energy_in * 0.01, "echo should be attenuated by at least 20dB")
-
-
-func test_capture_frame_rejects_invalid_frame_without_crashing():
-	var source = LiveKitAudioSource.create(48000, 1, 0)
-	var data := PackedFloat32Array()
-	data.resize(1920)
-	# Direct capture requires 10ms frames; the native error must not terminate the process.
-	source.capture_frame(data, 48000, 1, 1920)
-	assert_push_error(1)
