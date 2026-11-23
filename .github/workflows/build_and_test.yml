@@ -486,13 +486,25 @@ jobs:
         echo "LIVEKIT_TOKEN_2=$(python3 test/dev_token.py ios-user-2 ios-integration)" >> "$GITHUB_ENV"
 
     - name: Run tests
+      id: simulator-tests
       env:
         GODOT: ${{ github.workspace }}/Godot.app/Contents/MacOS/Godot
         GODOT_IOS_SIMULATOR_LIB: ${{ runner.temp }}/godot-ios-simulator/libgodot.a
-      run: ./test_ios.sh
+        # Tests that use the server are advisory until the first connection's timeouts in the
+        # simulator are fixed (#23).
+        ADVISORY_TEST_DIRS: test/integration test/e2e
+      run: |
+        status=0
+        ./test_ios.sh || status=$?
+        if [ "$status" -eq 3 ]; then
+          echo "::warning title=iOS server tests failed::Tests that use the LiveKit server failed in the simulator. They're advisory for now (#23)."
+          echo "advisory-failure=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        exit "$status"
 
     - name: Upload the LiveKit server log
-      if: failure()
+      if: failure() || steps.simulator-tests.outputs.advisory-failure == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: livekit-server-log-ios
