@@ -44,6 +44,9 @@ jobs:
           - os: ubuntu-latest
             os-name: Web
             platform: web
+          - os: macos-latest
+            os-name: iOS
+            platform: ios
 
     steps:
       - name: Checkout repository
@@ -74,6 +77,10 @@ jobs:
         if: matrix.platform == 'android'
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
+      - name: Install iOS build dependencies
+        if: matrix.platform == 'ios'
+        run: brew install ninja
+
       - name: Set up Emscripten
         if: matrix.platform == 'web'
         uses: mymindstorm/setup-emsdk@v16
@@ -91,6 +98,7 @@ jobs:
           path: |
             godot-cpp
             livekit-sdk
+            livekit-sdk-ios-*
           key: deps-${{ matrix.platform }}-${{ matrix.arch || matrix.platform }}-${{ hashFiles('build.sh', 'patches/**') }}
 
       - name: Build GDExtension
@@ -99,6 +107,10 @@ jobs:
           set -o pipefail
           echo "ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT:-<unset>} ANDROID_NDK_HOME=${ANDROID_NDK_HOME:-<unset>}"
           ./build.sh ${{ matrix.platform }} ${{ matrix.arch || '' }} 2>&1 | tee build-log.txt
+          # The iOS libraries are .xcframeworks holding both device and simulator builds.
+          if [ "${{ matrix.platform }}" == "ios" ]; then
+            ./build.sh ios --simulator 2>&1 | tee -a build-log.txt
+          fi
 
       - name: Upload build log
         if: always()

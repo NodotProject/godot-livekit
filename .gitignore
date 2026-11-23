@@ -8,6 +8,7 @@ export_presets.cfg
 # Build artifacts and downloaded SDKs
 godot-cpp/
 livekit-sdk/
+livekit-sdk-ios-*/
 livekit-sdk-build/
 livekit-js/
 src/web/gen/

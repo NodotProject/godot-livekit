@@ -1,5 +1,6 @@
 from SCons.Script import ARGUMENTS, Environment, Mkdir, Default, File, CacheDir
 import os
+import subprocess
 import sys
 
 # Resolve platform/target/arch from args
@@ -18,18 +19,23 @@ if platform == 'web':
     Exit(1)
 
 target = ARGUMENTS.get('target', 'template_release')
-if platform == 'android':
-    arch = ARGUMENTS.get('arch', 'arm64')
-elif platform == 'macos':
+if platform in ('android', 'macos', 'ios'):
     arch = ARGUMENTS.get('arch', 'arm64')
 else:
     arch = ARGUMENTS.get('arch', 'x86_64')
 
 is_windows = platform == 'windows'
 is_android = platform == 'android'
+is_ios = platform == 'ios'
+ios_simulator = is_ios and ARGUMENTS.get('ios_simulator', 'no').lower() in ['yes', 'true', '1']
+# Godot 4.5's iOS export templates need iOS 14.
+ios_min_version = ARGUMENTS.get('ios_min_version', '14.0')
 
-# Screen capture support (disabled for Android)
-enable_screen_capture = ARGUMENTS.get('screen_capture', 'no' if is_android else 'yes').lower() not in ['no', 'false', '0']
+# Device and simulator builds of the SDK can't share a directory.
+livekit_sdk_dir = ARGUMENTS.get('livekit_sdk', 'livekit-sdk')
+
+# Screen capture support (disabled on mobile)
+enable_screen_capture = ARGUMENTS.get('screen_capture', 'no' if is_android or is_ios else 'yes').lower() not in ['no', 'false', '0']
 
 # Set up the environment based on the platform
 use_mingw_arg = ARGUMENTS.get('use_mingw', 'no')
@@ -55,6 +61,13 @@ if is_android:
     env.Replace(LINK=os.path.join(ndk_bin, 'clang++'))
     env.Replace(AR=os.path.join(ndk_bin, 'llvm-ar'))
     env.Replace(RANLIB=os.path.join(ndk_bin, 'llvm-ranlib'))
+elif is_ios:
+    env = Environment()
+    ios_sdk = 'iphonesimulator' if ios_simulator else 'iphoneos'
+    ios_sdk_path = subprocess.check_output(['xcrun', '--sdk', ios_sdk, '--show-sdk-path'], text=True).strip()
+    env.Replace(CC=subprocess.check_output(['xcrun', '--sdk', ios_sdk, '-f', 'clang'], text=True).strip())
+    env.Replace(CXX=subprocess.check_output(['xcrun', '--sdk', ios_sdk, '-f', 'clang++'], text=True).strip())
+    env.Replace(LINK='$CXX')
 elif is_windows and not use_mingw:
     env = Environment(tools=['default', 'msvc'])
 elif is_windows and use_mingw:
@@ -78,7 +91,7 @@ cpppath = [
     'godot-cpp/include',
     'godot-cpp/gen/include',
     'godot-cpp/gdextension',
-    'livekit-sdk/include',
+    f'{livekit_sdk_dir}/include',
 ]
 if enable_screen_capture:
     cpppath.append('frametap/include')
@@ -89,7 +102,7 @@ if use_mingw and is_windows:
     env.Append(CCFLAGS=['--sysroot=/usr/x86_64-w64-mingw32'])
     env.Append(LINKFLAGS=['--sysroot=/usr/x86_64-w64-mingw32'])
 
-libpath = ['godot-cpp/bin', 'livekit-sdk/lib']
+libpath = ['godot-cpp/bin', f'{livekit_sdk_dir}/lib']
 if enable_screen_capture:
     libpath.append('frametap/lib')
 env.Append(LIBPATH=libpath)
@@ -101,6 +114,16 @@ if is_android:
     env.Append(CXXFLAGS=['-std=c++20'])
     env.Append(LINKFLAGS=[f'--target={android_target}', f'--sysroot={ndk_sysroot}'])
     env.Append(CPPDEFINES=['ANDROID_ENABLED', 'UNIX_ENABLED'])
+elif is_ios:
+    min_version_flag = (f'-mios-simulator-version-min={ios_min_version}' if ios_simulator
+                        else f'-miphoneos-version-min={ios_min_version}')
+    apple_flags = ['-arch', arch, '-isysroot', ios_sdk_path, min_version_flag]
+    env.Append(CCFLAGS=apple_flags + ['-fPIC'])
+    env.Append(CXXFLAGS=['-std=c++20'])
+    # Godot turns each library into a framework in the app's Frameworks directory, so the
+    # extension finds the SDK's frameworks beside its own.
+    env.Append(LINKFLAGS=apple_flags + ['-Wl,-rpath,@loader_path/..'])
+    env.Append(CPPDEFINES=['IOS_ENABLED', 'UNIX_ENABLED'])
 elif is_windows and not use_mingw:
     env.Append(CXXFLAGS=['/std:c++20', '/EHsc', '/MT'])
     env.Append(CPPDEFINES=['WIN32', '_WIN32', 'WINDOWS_ENABLED', 'TYPED_METHOD_BIND', 'NOMINMAX'])
@@ -137,6 +160,8 @@ if platform == 'macos':
         godot_cpp_lib = godot_cpp_lib_specific
     else:
         godot_cpp_lib = godot_cpp_lib_uni
+elif ios_simulator:
+    godot_cpp_lib = f"{lib_prefix}godot-cpp.{platform}.{target}.{arch}.simulator{lib_ext}"
 else:
     godot_cpp_lib = f"{lib_prefix}godot-cpp.{platform}.{target}.{arch}{lib_ext}"
 
@@ -145,10 +170,10 @@ env.Append(LIBS=[File(os.path.join('godot-cpp', 'bin', godot_cpp_lib))])
 # Add LiveKit libraries (linking dynamically since they are pre-built shared libs)
 if is_windows:
     # Livekit client-sdk-cpp on Windows provides .lib import files inside lib/
-    env.Append(LIBS=[File('livekit-sdk/lib/livekit_ffi.dll.lib'), File('livekit-sdk/lib/livekit.lib')])
+    env.Append(LIBS=[File(f'{livekit_sdk_dir}/lib/livekit_ffi.dll.lib'), File(f'{livekit_sdk_dir}/lib/livekit.lib')])
 elif is_android:
     env.Append(LIBS=['livekit_ffi', 'livekit', 'log'])
-elif platform == 'macos':
+elif platform in ('macos', 'ios'):
     env.Append(LIBS=['livekit_ffi', 'livekit'])
 else: # linux
     env.Append(LIBS=['livekit_ffi', 'livekit'])
@@ -216,7 +241,7 @@ env.Execute(Mkdir('addons/godot-livekit/bin'))
 if is_windows:
     env['SHLIBPREFIX'] = 'lib'
     env['SHLIBSUFFIX'] = '.dll'
-elif platform == 'macos':
+elif platform in ('macos', 'ios'):
     env['SHLIBPREFIX'] = 'lib'
     env['SHLIBSUFFIX'] = '.dylib'
 else:  # linux, android
@@ -232,5 +257,9 @@ if platform == 'windows':
     src_files.append('src/windows_pin.cpp')
 
 library = env.SharedLibrary(target=lib_name, source=src_files)
-installed_library = env.Install('addons/godot-livekit/bin', library)
+install_dir = 'addons/godot-livekit/bin'
+if is_ios:
+    # build.sh packages the device and simulator builds into .xcframeworks in the addon.
+    install_dir = f"build/ios-{arch}{'-simulator' if ios_simulator else ''}"
+installed_library = env.Install(install_dir, library)
 Default(installed_library)

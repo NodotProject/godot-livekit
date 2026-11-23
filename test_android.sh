@@ -168,7 +168,7 @@ export_apk() {
     for key in "${PASSTHROUGH_ENV[@]}"; do
         [ -n "${!key:-}" ] && user_args="$user_args $key=${!key}"
     done
-    extra_args="res://test/android/android_runner.tscn --rendering-method gl_compatibility --rendering-driver opengl3 --log-file user://$APP_LOG ++ $user_args"
+    extra_args="res://test/mobile/mobile_runner.tscn --rendering-method gl_compatibility --rendering-driver opengl3 --log-file user://$APP_LOG ++ $user_args"
 
     if [ -f export_presets.cfg ]; then
         cp export_presets.cfg "$WORK_DIR/export_presets.cfg"
@@ -251,7 +251,7 @@ run_app() {
         sleep 2
     done
     cat "$LOG_FILE"
-    result=$(grep -ao 'GUT_ANDROID_RESULT.*' "$LOG_FILE" | head -1 || true)
+    result=$(grep -ao 'GUT_MOBILE_RESULT.*' "$LOG_FILE" | head -1 || true)
 }
 
 # Prints what Android logged about the app stopping (a crash, the system killing it, or its activity
@@ -292,7 +292,7 @@ for attempt in 1 2 3; do
     exited_early=false
     run_app
     crash_log=$("$ADB" logcat -d -b crash -v tag 2>/dev/null | tr -d '\r' || true)
-    if [ -n "$result" ] || [ "$app_exited" != true ] || grep -aq 'GUT_ANDROID_STARTED' "$LOG_FILE" \
+    if [ -n "$result" ] || [ "$app_exited" != true ] || grep -aq 'GUT_MOBILE_STARTED' "$LOG_FILE" \
         || echo "$crash_log" | grep -q "$PACKAGE"; then
         break
     fi

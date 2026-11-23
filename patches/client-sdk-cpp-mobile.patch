@@ -1,15 +1,15 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 00d4bd3..230df50 100644
+index 00d4bd3..0a58e29 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -211,6 +211,15 @@ if(_lk_capture_features)
    list(JOIN _lk_capture_features "," LIVEKIT_CARGO_FEATURES)
    set(LIVEKIT_CAPTURE_ENABLED 1)
  endif()
-+# Android keeps its CA certificates where rustls-native-certs doesn't look, so use the bundled webpki roots there, as
-+# LiveKit's own Android FFI builds do.
++# rustls-native-certs can't load Android's or iOS's CA certificates, so use the bundled webpki roots there, as
++# LiveKit's own mobile FFI builds do.
 +set(LIVEKIT_CARGO_NO_DEFAULT_FEATURES OFF)
-+if(ANDROID)
++if(ANDROID OR IOS)
 +  set(LIVEKIT_CARGO_NO_DEFAULT_FEATURES ON)
 +  set(_lk_cargo_features ${_lk_capture_features} room-apis rustls-tls-webpki-roots)
 +  list(SORT _lk_cargo_features)
@@ -18,16 +18,28 @@ index 00d4bd3..230df50 100644
  message(STATUS "LIVEKIT_CAPTURE='${LIVEKIT_CAPTURE}' -> cargo features: '${LIVEKIT_CARGO_FEATURES}'")
  
  set(GIT_COMMIT "unknown")
-@@ -261,14 +270,55 @@ configure_file(
+@@ -261,14 +270,66 @@ configure_file(
  
  find_program(CARGO_EXECUTABLE NAMES cargo REQUIRED)
  
 -# Determine Rust target triple for cross-compilation on macOS
-+# Determine Rust target triple for cross-compilation on macOS and Android
++# Determine Rust target triple for cross-compilation on macOS, iOS and Android
  set(RUST_TARGET_TRIPLE "")
+-if(APPLE AND CMAKE_OSX_ARCHITECTURES)
 +set(LIVEKIT_ANDROID_NDK "")
 +set(LIVEKIT_ANDROID_CC "")
- if(APPLE AND CMAKE_OSX_ARCHITECTURES)
++if(IOS)
++  # LiveKit's WebRTC builds for iOS are arm64 only, for devices and for the simulator.
++  if(NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
++    message(FATAL_ERROR "iOS builds need CMAKE_OSX_ARCHITECTURES=arm64, not '${CMAKE_OSX_ARCHITECTURES}'")
++  endif()
++  # CMake builds for the simulator when the sysroot is the simulator SDK, given by name or by path.
++  if(CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")
++    set(RUST_TARGET_TRIPLE "aarch64-apple-ios-sim")
++  else()
++    set(RUST_TARGET_TRIPLE "aarch64-apple-ios")
++  endif()
++elseif(APPLE AND CMAKE_OSX_ARCHITECTURES)
    if(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
      set(RUST_TARGET_TRIPLE "x86_64-apple-darwin")
    elseif(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
@@ -75,7 +87,7 @@ index 00d4bd3..230df50 100644
  endif()
  
  # Cargo artifacts cannot be shared between capture-enabled and disabled SDKs.
-@@ -293,7 +343,8 @@ endif()
+@@ -293,7 +354,8 @@ endif()
  # This is needed when using a non-system GCC (e.g. GCC 14) on an older distro whose
  # system libstdc++ lacks symbols like __cxa_call_terminate.
  set(GCC_LIB_DIR "")
@@ -85,7 +97,7 @@ index 00d4bd3..230df50 100644
    get_filename_component(_gcc_bin_dir "${CMAKE_C_COMPILER}" DIRECTORY)
    get_filename_component(_gcc_root "${_gcc_bin_dir}" DIRECTORY)
    if(IS_DIRECTORY "${_gcc_root}/lib64")
-@@ -397,8 +448,12 @@ add_custom_command(
+@@ -397,8 +459,12 @@ add_custom_command(
            -DCARGO=${CARGO_EXECUTABLE}
            -DPROTOC_PATH=${Protobuf_PROTOC_EXECUTABLE}
            -DRUST_TARGET=${RUST_TARGET_TRIPLE}
@@ -98,16 +110,54 @@ index 00d4bd3..230df50 100644
            -DCARGO_TARGET_DIR=${LIVEKIT_CARGO_TARGET_DIR}
            -P "${RUN_CARGO_SCRIPT}"
    WORKING_DIRECTORY "${RUST_ROOT}"
-@@ -533,7 +588,7 @@ target_link_libraries(livekit
+@@ -533,7 +599,7 @@ target_link_libraries(livekit
  
  if(WIN32)
    target_link_libraries(livekit PRIVATE winhttp)
 -else()
-+elseif(NOT ANDROID)
++elseif(NOT ANDROID AND NOT IOS)
    find_package(CURL REQUIRED)
    target_link_libraries(livekit PRIVATE CURL::libcurl)
  endif()
-@@ -684,7 +739,7 @@ if(WIN32)
+@@ -637,13 +703,16 @@ if(APPLE)
+   find_library(FW_AVFOUNDATION   AVFoundation   REQUIRED)
+   find_library(FW_COREVIDEO      CoreVideo      REQUIRED)
+   find_library(FW_FOUNDATION     Foundation     REQUIRED)
+-  find_library(FW_APPKIT         AppKit         REQUIRED)
+   find_library(FW_QUARTZCORE     QuartzCore     REQUIRED)
+-  find_library(FW_OPENGL         OpenGL         REQUIRED)
+   find_library(FW_IOSURFACE      IOSurface      REQUIRED)
+   find_library(FW_METAL          Metal          REQUIRED)
+   find_library(FW_METALKIT       MetalKit       REQUIRED)
+-  find_library(FW_SCREENCAPTUREKIT ScreenCaptureKit REQUIRED)
++  # iOS has none of these.
++  if(NOT IOS)
++    find_library(FW_APPKIT         AppKit         REQUIRED)
++    find_library(FW_OPENGL         OpenGL         REQUIRED)
++    find_library(FW_SCREENCAPTUREKIT ScreenCaptureKit REQUIRED)
++  endif()
+ 
+   target_link_libraries(livekit PRIVATE
+     ${FW_COREAUDIO}
+@@ -656,14 +725,14 @@ if(APPLE)
+     ${FW_AVFOUNDATION}
+     ${FW_COREVIDEO}
+     ${FW_FOUNDATION}
+-    ${FW_APPKIT}
+     ${FW_QUARTZCORE}
+-    ${FW_OPENGL}
+     ${FW_IOSURFACE}
+     ${FW_METAL}
+     ${FW_METALKIT}
+-    ${FW_SCREENCAPTUREKIT}
+   )
++  if(NOT IOS)
++    target_link_libraries(livekit PRIVATE ${FW_APPKIT} ${FW_OPENGL} ${FW_SCREENCAPTUREKIT})
++  endif()
+ 
+   target_link_options(livekit PRIVATE "LINKER:-ObjC")
+ endif()
+@@ -684,7 +753,7 @@ if(WIN32)
    )
  endif()
  
@@ -231,15 +281,30 @@ index f5d5f1a..0edc902 100644
      WORKING_DIRECTORY "${RUST_ROOT}"
      DEPENDS ${RUST_SOURCES} "${RUN_CARGO_SCRIPT}"
 diff --git a/src/token_source_http.cpp b/src/token_source_http.cpp
-index 470e85d..99254be 100644
+index 470e85d..93b20c7 100644
 --- a/src/token_source_http.cpp
 +++ b/src/token_source_http.cpp
-@@ -27,14 +27,14 @@
+@@ -21,20 +21,29 @@
+ 
+ #include "token_source_internal.h"
+ 
++#if defined(__APPLE__)
++#include <TargetConditionals.h>
++#endif
++
++// Android and iOS have no system libcurl, and bundling one would mean bundling a TLS library too.
++#if defined(__ANDROID__) || (defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
++#define LIVEKIT_NO_HTTP_TOKEN_SOURCE 1
++#endif
++
+ #if defined(_WIN32)
+ #ifndef NOMINMAX
+ #define NOMINMAX
  #endif
  #include <windows.h>
  #include <winhttp.h>
 -#else
-+#elif !defined(__ANDROID__)
++#elif !defined(LIVEKIT_NO_HTTP_TOKEN_SOURCE)
  #include <curl/curl.h>
  #endif
  
@@ -247,19 +312,19 @@ index 470e85d..99254be 100644
  namespace {
  
 -#if !defined(_WIN32)
-+#if !defined(_WIN32) && !defined(__ANDROID__)
++#if !defined(_WIN32) && !defined(LIVEKIT_NO_HTTP_TOKEN_SOURCE)
  size_t curlWriteCallback(char* contents, size_t size, size_t nmemb, void* user_data) {
    const size_t total_size = size * nmemb;
    auto* response = static_cast<std::string*>(user_data);
-@@ -43,6 +43,7 @@ size_t curlWriteCallback(char* contents, size_t size, size_t nmemb, void* user_d
+@@ -43,6 +52,7 @@ size_t curlWriteCallback(char* contents, size_t size, size_t nmemb, void* user_d
  }
  #endif
  
-+#if !defined(__ANDROID__)
++#if !defined(LIVEKIT_NO_HTTP_TOKEN_SOURCE)
  std::string normalizeHttpMethod(std::string method) {
    if (method.empty()) {
      return "POST";
-@@ -61,6 +62,7 @@ std::int64_t effectiveTimeoutMs(std::chrono::milliseconds timeout) {
+@@ -61,6 +71,7 @@ std::int64_t effectiveTimeoutMs(std::chrono::milliseconds timeout) {
    const std::int64_t count = timeout.count();
    return count > 0 ? count : kDefaultTimeoutMs;
  }
@@ -267,18 +332,17 @@ index 470e85d..99254be 100644
  
  #if defined(_WIN32)
  std::wstring toWide(const std::string& value) {
-@@ -198,6 +200,14 @@ Result<std::string, std::string> tokenSourceHttpRequest(const std::string& metho
+@@ -198,6 +209,13 @@ Result<std::string, std::string> tokenSourceHttpRequest(const std::string& metho
                                                          std::chrono::milliseconds timeout) {
  #if defined(_WIN32)
    return winHttpRequest(method, url, headers, json_body, timeout);
-+#elif defined(__ANDROID__)
-+  // Android has no system libcurl, and bundling one would mean bundling a TLS library too.
++#elif defined(LIVEKIT_NO_HTTP_TOKEN_SOURCE)
 +  static_cast<void>(method);
 +  static_cast<void>(url);
 +  static_cast<void>(headers);
 +  static_cast<void>(json_body);
 +  static_cast<void>(timeout);
-+  return Result<std::string, std::string>::failure("HTTP token sources aren't supported on Android");
++  return Result<std::string, std::string>::failure("HTTP token sources aren't supported on Android or iOS");
  #else
    CURL* curl = curl_easy_init();
    if (curl == nullptr) {
